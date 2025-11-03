@@ -1,7 +1,196 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSession } from 'next-auth/react';
+import { 
+  Shield, 
+  Target, 
+  Bug, 
+  Users,
+  TrendingUp,
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  Activity
+} from 'lucide-react';
+import { Card } from '@/components/ui';
+import { StatCard } from '@/components/cards/StatCard';
+import { ComplianceCard } from '@/components/cards/ComplianceCard';
+import { VulnerabilitySeverityChart } from '@/components/charts/VulnerabilitySeverityChart';
+import { VulnerabilityBreakdownChart } from '@/components/charts/VulnerabilityBreakdownChart';
+import { RecentActivity } from '@/components/lists/RecentActivity';
+import { LoadingSkeleton } from '@/components/LoadingSkeleton';
+import { useDashboard, usePrefetch } from '@/hooks/useOptimizedQueries';
+import dynamic from 'next/dynamic';
+
+// Lazy load heavy components
+const HeavyChart = dynamic(() => import('@/components/charts/VulnerabilityBreakdownChart'), {
+  loading: () => <LoadingSkeleton />,
+  ssr: false
+});
+
+export default function DashboardPage() {
+  const { data: session } = useSession();
+  const { data: dashboard, isLoading, error } = useDashboard();
+  const { prefetchPentests, prefetchFindings } = usePrefetch();
+  
+  // Prefetch data for navigation
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      prefetchPentests();
+      prefetchFindings();
+    }, 1000);
+    
+    return () => clearTimeout(timer);
+  }, [prefetchPentests, prefetchFindings]);
+  
+  if (isLoading) {
+    return <DashboardSkeleton />;
+  }
+  
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-red-700">Failed to load dashboard data. Please refresh the page.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const stats = dashboard?.stats || {
+    activePentests: 0,
+    criticalFindings: 0,
+    highRiskTargets: 0,
+    totalFindings: 0,
+    completedPentests: 0
+  };
+
+  return (
+    <div className="space-y-6 p-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+        <p className="text-gray-600 mt-2">
+          Welcome back, {session?.user?.name || 'User'}! Here's your security overview.
+        </p>
+      </div>
+
+      {/* Quick Stats with optimized rendering */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Suspense fallback={<LoadingSkeleton />}>
+          <StatCard
+            title="Critical Findings"
+            value={stats.criticalFindings}
+            subtitle={`${stats.totalFindings} total`}
+            icon={AlertTriangle}
+            trend="up"
+            trendValue={12}
+            color="red"
+          />
+        </Suspense>
+        
+        <Suspense fallback={<LoadingSkeleton />}>
+          <StatCard
+            title="Active Pentests"
+            value={stats.activePentests}
+            subtitle={`${stats.completedPentests} completed`}
+            icon={Shield}
+            trend="up"
+            trendValue={8}
+            color="blue"
+          />
+        </Suspense>
+        
+        <Suspense fallback={<LoadingSkeleton />}>
+          <StatCard
+            title="High Risk Targets"
+            value={stats.highRiskTargets}
+            subtitle="3 total targets"
+            icon={Target}
+            trend="down"
+            trendValue={5}
+            color="orange"
+          />
+        </Suspense>
+        
+        <Suspense fallback={<LoadingSkeleton />}>
+          <StatCard
+            title="Total Findings"
+            value={stats.totalFindings}
+            subtitle="3 open"
+            icon={Bug}
+            trend="up"
+            trendValue={15}
+            color="green"
+          />
+        </Suspense>
+      </div>
+
+      {/* Charts Section with lazy loading */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Suspense fallback={<LoadingSkeleton />}>
+          <Card className="p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+              Findings by Severity
+            </h2>
+            <div className="h-64">
+              <VulnerabilitySeverityChart data={dashboard?.severityBreakdown} />
+            </div>
+          </Card>
+        </Suspense>
+
+        <Suspense fallback={<LoadingSkeleton />}>
+          <Card className="p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+              Findings Trend
+            </h2>
+            <div className="h-64">
+              <HeavyChart data={dashboard?.activityTrend} />
+            </div>
+          </Card>
+        </Suspense>
+      </div>
+
+      {/* Recent Activity and Compliance */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <Suspense fallback={<LoadingSkeleton />}>
+            <RecentActivity activities={dashboard?.recentFindings || []} />
+          </Suspense>
+        </div>
+        
+        <div>
+          <Suspense fallback={<LoadingSkeleton />}>
+            <ComplianceCard 
+              percentage={dashboard?.complianceStatus?.percentage || 0}
+              compliant={dashboard?.complianceStatus?.compliant || 0}
+              total={dashboard?.complianceStatus?.total || 0}
+            />
+          </Suspense>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Skeleton loader component
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-6 p-6 animate-pulse">
+      <div className="h-8 bg-gray-200 rounded w-48"></div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-32 bg-gray-200 rounded-lg"></div>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="h-80 bg-gray-200 rounded-lg"></div>
+        <div className="h-80 bg-gray-200 rounded-lg"></div>
+      </div>
+    </div>
+  );
+}
 import { 
   Shield, 
   Target, 

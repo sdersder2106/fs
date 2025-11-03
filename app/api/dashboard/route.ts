@@ -9,9 +9,196 @@ import {
 } from '@/lib/api-response';
 import { subDays, startOfDay, endOfDay } from 'date-fns';
 
-// Force dynamic rendering
+// Force dynamic rendering with Edge Runtime for better performance
+export const runtime = 'nodejs'; // Use 'edge' for simpler queries
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+
+// Add caching headers
+const setCacheHeaders = (response: NextResponse, maxAge: number = 60) => {
+  response.headers.set('Cache-Control', `s-maxage=${maxAge}, stale-while-revalidate=59`);
+  return response;
+};
+
+export async function GET(request: NextRequest) {
+  try {
+    // Auth check with early return
+    const authResult = await requireAuth(request);
+    if (!authResult.authenticated) {
+      return unauthorizedResponse();
+    }
+
+    const { user } = authResult;
+    const { searchParams } = new URL(request.url);
+    const period = searchParams.get('period') || '30';
+    const days = parseInt(period);
+    const startDate = startOfDay(subDays(new Date(), days));
+    const endDate = endOfDay(new Date());
+
+    // Parallel database queries with optimized selects
+    const [
+      stats,
+      recentFindings,
+      severityBreakdown,
+      complianceStatus,
+      activityData
+    ] = await Promise.all([
+      // Basic stats - use count for performance
+      Promise.all([
+        prisma.pentest.count({
+          where: {
+            companyId: user.companyId!,
+            status: 'ACTIVE'
+          }
+        }),
+        prisma.finding.count({
+          where: {
+            companyId: user.companyId!,
+            severity: 'CRITICAL',
+            status: 'OPEN'
+          }
+        }),
+        prisma.target.count({
+          where: {
+            companyId: user.companyId!,
+            risk: 'HIGH'
+          }
+        }),
+        prisma.finding.count({
+          where: {
+            companyId: user.companyId!,
+            status: 'OPEN'
+          }
+        }),
+        prisma.pentest.count({
+          where: {
+            companyId: user.companyId!,
+            status: 'COMPLETED'
+          }
+        })
+      ]),
+      
+      // Recent findings - limit fields for performance
+      prisma.finding.findMany({
+        where: {
+          companyId: user.companyId!,
+          createdAt: {
+            gte: startDate,
+            lte: endDate
+          }
+        },
+        select: {
+          id: true,
+          title: true,
+          severity: true,
+          status: true,
+          createdAt: true,
+          pentest: {
+            select: {
+              id: true,
+              name: true
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10
+      }),
+      
+      // Severity breakdown - use groupBy for efficiency
+      prisma.finding.groupBy({
+        by: ['severity'],
+        where: {
+          companyId: user.companyId!,
+          status: 'OPEN'
+        },
+        _count: true
+      }),
+      
+      // Compliance status
+      prisma.finding.groupBy({
+        by: ['complianceStatus'],
+        where: {
+          companyId: user.companyId!
+        },
+        _count: true
+      }),
+      
+      // Activity trend data - aggregate by day
+      prisma.$queryRaw`
+        SELECT 
+          DATE(created_at) as date,
+          COUNT(*) as count,
+          severity
+        FROM "Finding"
+        WHERE company_id = ${user.companyId}
+          AND created_at >= ${startDate}
+          AND created_at <= ${endDate}
+        GROUP BY DATE(created_at), severity
+        ORDER BY date ASC
+      `
+    ]);
+
+    // Format the response
+    const formattedStats = {
+      activePentests: stats[0],
+      criticalFindings: stats[1],
+      highRiskTargets: stats[2],
+      totalFindings: stats[3],
+      completedPentests: stats[4]
+    };
+
+    // Format severity breakdown
+    const severityData = {
+      CRITICAL: 0,
+      HIGH: 0,
+      MEDIUM: 0,
+      LOW: 0,
+      INFO: 0
+    };
+    
+    severityBreakdown.forEach((item) => {
+      severityData[item.severity] = item._count;
+    });
+
+    // Calculate compliance percentage
+    let compliancePercentage = 0;
+    let totalCompliance = 0;
+    let compliantCount = 0;
+    
+    complianceStatus.forEach((item) => {
+      totalCompliance += item._count;
+      if (item.complianceStatus === 'COMPLIANT') {
+        compliantCount = item._count;
+      }
+    });
+    
+    if (totalCompliance > 0) {
+      compliancePercentage = Math.round((compliantCount / totalCompliance) * 100);
+    }
+
+    // Prepare response data
+    const dashboardData = {
+      stats: formattedStats,
+      recentFindings,
+      severityBreakdown: severityData,
+      complianceStatus: {
+        percentage: compliancePercentage,
+        compliant: compliantCount,
+        total: totalCompliance
+      },
+      activityTrend: activityData,
+      lastUpdated: new Date().toISOString()
+    };
+
+    // Return with cache headers
+    const response = successResponse(dashboardData);
+    return setCacheHeaders(response, 60); // Cache for 60 seconds
+    
+  } catch (error) {
+    console.error('Dashboard API error:', error);
+    return errorResponse('Failed to fetch dashboard data');
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
