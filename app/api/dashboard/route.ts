@@ -9,12 +9,8 @@ export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
   try {
-    const authResult = await requireAuth(request);
-    if (!authResult.authenticated) {
-      return unauthorizedResponse();
-    }
-
-    const { user } = authResult;
+    // requireAuth() returns the user directly or throws an error
+    const user = await requireAuth();
     
     // OPTIMIZED: Only get counts, no full data
     const [
