@@ -1,0 +1,204 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Company {
+  id          String   @id @default(cuid())
+  name        String
+  domain      String?
+  logo        String?
+  description String?
+  
+  users       User[]
+  pentests    Pentest[]
+  targets     Target[]
+  findings    Finding[]
+  reports     Report[]
+  templates   Template[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  fullName      String
+  role          String    // ADMIN, PENTESTER, CLIENT
+  phone         String?
+  avatar        String?
+  bio           String?   @db.Text
+  
+  companyId     String
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  pentestsCreated   Pentest[]   @relation("PentestCreator")
+  findingsReported  Finding[]   @relation("Reporter")
+  findingsAssigned  Finding[]   @relation("AssignedTo")
+  comments          Comment[]
+  notifications     Notification[]
+  reportsGenerated  Report[]
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Target {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // WEB_APP, API, MOBILE_APP, CLOUD, HOST, NETWORK
+  url         String?
+  ipAddress   String?
+  description String?  @db.Text
+  status      String   // ACTIVE, INACTIVE, ARCHIVED
+  riskScore   Int      @default(0)
+  scope       Json?
+  
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  pentests    Pentest[]
+  findings    Finding[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Pentest {
+  id          String   @id @default(cuid())
+  title       String
+  description String?  @db.Text
+  status      String   // SCHEDULED, IN_PROGRESS, REPORTED, RESCAN, COMPLETED, CANCELLED
+  progress    Int      @default(0)
+  startDate   DateTime
+  endDate     DateTime
+  methodology String?  @db.Text
+  
+  targetId    String
+  target      Target   @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User     @relation("PentestCreator", fields: [createdById], references: [id])
+  
+  findings    Finding[]
+  reports     Report[]
+  comments    Comment[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Finding {
+  id                String   @id @default(cuid())
+  title             String
+  description       String   @db.Text
+  severity          String   // CRITICAL, HIGH, MEDIUM, LOW, INFO
+  cvssScore         Float
+  status            String   // OPEN, IN_PROGRESS, RESOLVED, CLOSED
+  category          String?
+  
+  // Evidence
+  proofOfConcept    String?  @db.Text
+  reproductionSteps String?  @db.Text
+  requestExample    String?  @db.Text
+  responseExample   String?  @db.Text
+  evidenceImages    String[]
+  
+  // Remediation
+  remediation       String?  @db.Text
+  remediationCode   String?  @db.Text
+  references        String[]
+  
+  pentestId     String
+  pentest       Pentest  @relation(fields: [pentestId], references: [id], onDelete: Cascade)
+  targetId      String
+  target        Target   @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  reporterId    String
+  reporter      User     @relation("Reporter", fields: [reporterId], references: [id])
+  assignedToId  String?
+  assignedTo    User?    @relation("AssignedTo", fields: [assignedToId], references: [id])
+  
+  comments      Comment[]
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Comment {
+  id          String   @id @default(cuid())
+  text        String   @db.Text
+  
+  pentestId   String?
+  pentest     Pentest? @relation(fields: [pentestId], references: [id], onDelete: Cascade)
+  findingId   String?
+  finding     Finding? @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Report {
+  id              String   @id @default(cuid())
+  title           String
+  reportType      String   // EXECUTIVE, TECHNICAL, FULL
+  status          String   // DRAFT, FINAL, APPROVED
+  format          String   // PDF, DOCX, HTML
+  fileUrl         String?
+  
+  pentestId       String
+  pentest         Pentest  @relation(fields: [pentestId], references: [id], onDelete: Cascade)
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  generatedAt     DateTime?
+  generatedBy     String?
+  generator       User?    @relation(fields: [generatedBy], references: [id])
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  type        String   // FINDING, REPORT
+  category    String?
+  content     String   @db.Text
+  isPublic    Boolean  @default(false)
+  
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  title       String
+  message     String   @db.Text
+  type        String   // INFO, WARNING, SUCCESS, ERROR
+  isRead      Boolean  @default(false)
+  link        String?
+  
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+}
