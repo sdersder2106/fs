@@ -1,74 +1,49 @@
 'use client';
 
-import React from 'react';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/Button';
+import { ReactNode } from 'react';
+import { Button } from '@/components/ui';
 
 interface EmptyStateProps {
-  icon?: React.ReactNode;
+  icon?: ReactNode;
   title: string;
   description?: string;
-  action?: {
-    label: string;
-    onClick: () => void;
-    variant?: 'primary' | 'secondary' | 'ghost';
-  };
-  secondaryAction?: {
-    label: string;
-    onClick: () => void;
-  };
-  className?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  actionHref?: string;
 }
 
-const EmptyState: React.FC<EmptyStateProps> = ({
+export default function EmptyState({
   icon,
   title,
   description,
-  action,
-  secondaryAction,
-  className,
-}) => {
+  actionLabel,
+  onAction,
+  actionHref,
+}: EmptyStateProps) {
   return (
-    <div
-      className={cn(
-        'flex flex-col items-center justify-center py-12 px-4 text-center',
-        className
-      )}
-    >
+    <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
       {icon && (
-        <div className="mb-4 text-gray-400">
-          {React.cloneElement(icon as React.ReactElement, {
-            className: 'w-12 h-12',
-          })}
+        <div className="flex justify-center mb-4">
+          {icon}
         </div>
       )}
-      
-      <h3 className="text-lg font-semibold text-gray-900 mb-1">{title}</h3>
-      
+      <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
       {description && (
-        <p className="text-sm text-gray-500 max-w-md mb-6">{description}</p>
+        <p className="text-gray-600 mb-6 max-w-md mx-auto">{description}</p>
       )}
-      
-      {(action || secondaryAction) && (
-        <div className="flex flex-col sm:flex-row gap-3">
-          {action && (
-            <Button
-              variant={action.variant || 'primary'}
-              onClick={action.onClick}
-            >
-              {action.label}
-            </Button>
-          )}
-          
-          {secondaryAction && (
-            <Button variant="ghost" onClick={secondaryAction.onClick}>
-              {secondaryAction.label}
+      {(actionLabel && (onAction || actionHref)) && (
+        <div>
+          {actionHref ? (
+            <a href={actionHref}>
+              <Button variant="primary">{actionLabel}</Button>
+            </a>
+          ) : (
+            <Button variant="primary" onClick={onAction}>
+              {actionLabel}
             </Button>
           )}
         </div>
       )}
     </div>
   );
-};
-
-export default EmptyState;
+}

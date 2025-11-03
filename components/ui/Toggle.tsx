@@ -1,157 +1,100 @@
-'use client';
-
 import React from 'react';
 import { cn } from '@/lib/utils';
 
-export interface ToggleProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'role'> {
+export interface ToggleProps {
+  checked?: boolean;
+  defaultChecked?: boolean;
+  onChange?: (checked: boolean) => void;
   label?: string;
-  error?: string;
-  hint?: string;
+  description?: string;
+  disabled?: boolean;
   size?: 'sm' | 'md' | 'lg';
-  labelPosition?: 'left' | 'right';
 }
 
-const Toggle = React.forwardRef<HTMLInputElement, ToggleProps>(
-  (
-    {
-      className,
-      label,
-      error,
-      hint,
-      size = 'md',
-      labelPosition = 'right',
-      disabled,
-      required,
-      id,
-      checked,
-      ...props
+export function Toggle({
+  checked,
+  defaultChecked = false,
+  onChange,
+  label,
+  description,
+  disabled = false,
+  size = 'md',
+}: ToggleProps) {
+  const [isChecked, setIsChecked] = React.useState(checked ?? defaultChecked);
+
+  React.useEffect(() => {
+    if (checked !== undefined) {
+      setIsChecked(checked);
+    }
+  }, [checked]);
+
+  const handleToggle = () => {
+    if (disabled) return;
+    const newValue = !isChecked;
+    setIsChecked(newValue);
+    onChange?.(newValue);
+  };
+
+  const sizes = {
+    sm: {
+      track: 'w-9 h-5',
+      thumb: 'w-3.5 h-3.5',
+      translate: 'translate-x-4',
     },
-    ref
-  ) => {
-    const toggleId = id || `toggle-${Math.random().toString(36).substr(2, 9)}`;
+    md: {
+      track: 'w-11 h-6',
+      thumb: 'w-4 h-4',
+      translate: 'translate-x-5',
+    },
+    lg: {
+      track: 'w-14 h-7',
+      thumb: 'w-5 h-5',
+      translate: 'translate-x-7',
+    },
+  };
 
-    const sizes = {
-      sm: {
-        track: 'h-5 w-9',
-        thumb: 'h-4 w-4',
-        translate: 'translate-x-4',
-      },
-      md: {
-        track: 'h-6 w-11',
-        thumb: 'h-5 w-5',
-        translate: 'translate-x-5',
-      },
-      lg: {
-        track: 'h-7 w-14',
-        thumb: 'h-6 w-6',
-        translate: 'translate-x-7',
-      },
-    };
+  const sizeClasses = sizes[size];
 
-    const baseTrackStyles = cn(
-      'relative inline-flex shrink-0 cursor-pointer rounded-full',
-      'border-2 border-transparent transition-colors duration-200 ease-in-out',
-      'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2',
-      disabled && 'cursor-not-allowed opacity-50',
-      error ? 'bg-red-200' : checked ? 'bg-primary-600' : 'bg-gray-200',
-      sizes[size].track
-    );
-
-    const baseThumbStyles = cn(
-      'pointer-events-none inline-block rounded-full bg-white shadow-lg',
-      'ring-0 transition-transform duration-200 ease-in-out',
-      sizes[size].thumb,
-      checked ? sizes[size].translate : 'translate-x-0'
-    );
-
-    const content = (
-      <>
-        {label && labelPosition === 'left' && (
-          <label
-            htmlFor={toggleId}
-            className={cn(
-              'text-sm text-gray-700 cursor-pointer select-none mr-3',
-              disabled && 'cursor-not-allowed opacity-50'
-            )}
-          >
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
+  return (
+    <div className="flex items-start gap-3">
+      {/* Toggle */}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={isChecked}
+        onClick={handleToggle}
+        disabled={disabled}
+        className={cn(
+          "relative inline-flex flex-shrink-0 rounded-full transition-colors duration-200 ease-in-out",
+          "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
+          sizeClasses.track,
+          isChecked ? "bg-blue-600" : "bg-gray-200",
+          disabled && "opacity-50 cursor-not-allowed"
         )}
-
-        <button
-          type="button"
-          role="switch"
-          aria-checked={checked}
-          aria-labelledby={label ? `${toggleId}-label` : undefined}
-          onClick={() => {
-            const input = document.getElementById(toggleId) as HTMLInputElement;
-            if (input && !disabled) {
-              const event = new Event('change', { bubbles: true });
-              input.checked = !input.checked;
-              input.dispatchEvent(event);
-            }
-          }}
-          className={baseTrackStyles}
-          disabled={disabled}
-        >
-          <span className={baseThumbStyles} />
-        </button>
-
-        {label && labelPosition === 'right' && (
-          <label
-            htmlFor={toggleId}
-            id={`${toggleId}-label`}
-            className={cn(
-              'text-sm text-gray-700 cursor-pointer select-none ml-3',
-              disabled && 'cursor-not-allowed opacity-50'
-            )}
-          >
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-
-        <input
-          ref={ref}
-          id={toggleId}
-          type="checkbox"
-          className="sr-only"
-          disabled={disabled}
-          required={required}
-          checked={checked}
-          aria-invalid={!!error}
-          aria-describedby={
-            error ? `${toggleId}-error` : hint ? `${toggleId}-hint` : undefined
-          }
-          {...props}
+      >
+        <span
+          className={cn(
+            "pointer-events-none inline-block rounded-full bg-white shadow transform transition-transform duration-200 ease-in-out",
+            sizeClasses.thumb,
+            "translate-x-1",
+            isChecked && sizeClasses.translate
+          )}
         />
-      </>
-    );
+      </button>
 
-    return (
-      <div className="relative">
-        <div className="flex items-center">{content}</div>
-
-        {error && (
-          <div
-            id={`${toggleId}-error`}
-            className="mt-1 text-sm text-red-600"
-          >
-            {error}
-          </div>
-        )}
-
-        {hint && !error && (
-          <p id={`${toggleId}-hint`} className="mt-1 text-sm text-gray-500">
-            {hint}
-          </p>
-        )}
-      </div>
-    );
-  }
-);
-
-Toggle.displayName = 'Toggle';
-
-export { Toggle };
+      {/* Label and description */}
+      {(label || description) && (
+        <div className="flex-1">
+          {label && (
+            <label className="text-sm font-medium text-gray-900 cursor-pointer" onClick={handleToggle}>
+              {label}
+            </label>
+          )}
+          {description && (
+            <p className="text-sm text-gray-500 mt-0.5">{description}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

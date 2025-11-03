@@ -1,119 +1,210 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAuth } from '@/lib/auth-helpers';
-import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/api-response';
+import { getAuthUser } from '@/lib/auth-helpers';
+import { handleApiError, successResponse } from '@/lib/api-response';
 
-// Force dynamic rendering
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
+// GET /api/dashboard - Get dashboard statistics
 export async function GET(request: NextRequest) {
   try {
-    const authResult = await requireAuth(request);
-    if (!authResult.authenticated) {
-      return unauthorizedResponse();
+    const user = await getAuthUser();
+    const { searchParams } = new URL(request.url);
+    
+    const companyId = searchParams.get('companyId') || user.companyId;
+
+    // Build where clause based on role
+    const where: any = {};
+    if (user.role === 'CLIENT' && user.companyId) {
+      where.companyId = user.companyId;
+    } else if (companyId) {
+      where.companyId = companyId;
     }
 
-    const { user } = authResult;
-    
-    // OPTIMIZED: Only get counts, no full data
+    // Get counts
     const [
-      criticalFindings,
+      totalPentests,
       activePentests,
-      highRiskTargets,
+      totalTargets,
+      activeTargets,
       totalFindings,
-      completedPentests
+      criticalFindings,
+      highFindings,
+      mediumFindings,
+      lowFindings,
+      infoFindings,
+      openFindings,
     ] = await Promise.all([
-      prisma.finding.count({
-        where: {
-          companyId: user.companyId!,
-          severity: 'CRITICAL',
-          status: 'OPEN'
-        }
-      }),
+      // Total pentests
+      prisma.pentest.count({ where }),
+      
+      // Active pentests (IN_PROGRESS)
       prisma.pentest.count({
-        where: {
-          companyId: user.companyId!,
-          status: 'ACTIVE'
-        }
+        where: { ...where, status: 'IN_PROGRESS' },
       }),
+      
+      // Total targets
+      prisma.target.count({ where }),
+      
+      // Active targets
       prisma.target.count({
-        where: {
-          companyId: user.companyId!,
-          risk: 'HIGH'
-        }
+        where: { ...where, status: 'ACTIVE' },
       }),
+      
+      // Total findings
+      prisma.finding.count({ where }),
+      
+      // Critical findings
       prisma.finding.count({
-        where: {
-          companyId: user.companyId!,
-          status: 'OPEN'
-        }
+        where: { ...where, severity: 'CRITICAL' },
       }),
-      prisma.pentest.count({
-        where: {
-          companyId: user.companyId!,
-          status: 'COMPLETED'
-        }
-      })
+      
+      // High findings
+      prisma.finding.count({
+        where: { ...where, severity: 'HIGH' },
+      }),
+      
+      // Medium findings
+      prisma.finding.count({
+        where: { ...where, severity: 'MEDIUM' },
+      }),
+      
+      // Low findings
+      prisma.finding.count({
+        where: { ...where, severity: 'LOW' },
+      }),
+      
+      // Info findings
+      prisma.finding.count({
+        where: { ...where, severity: 'INFO' },
+      }),
+      
+      // Open findings
+      prisma.finding.count({
+        where: { ...where, status: 'OPEN' },
+      }),
     ]);
 
-    // Get only LAST 5 findings for activity
-    const recentFindings = await prisma.finding.findMany({
-      where: {
-        companyId: user.companyId!
+    // Get findings by category
+    const findingsByCategory = await prisma.finding.groupBy({
+      by: ['category'],
+      where,
+      _count: true,
+      orderBy: {
+        _count: {
+          category: 'desc',
+        },
       },
+      take: 10,
+    });
+
+    // Get findings by severity (for chart)
+    const findingsBySeverity = [
+      { severity: 'CRITICAL', count: criticalFindings },
+      { severity: 'HIGH', count: highFindings },
+      { severity: 'MEDIUM', count: mediumFindings },
+      { severity: 'LOW', count: lowFindings },
+      { severity: 'INFO', count: infoFindings },
+    ];
+
+    // Get recent activity (last 10 items)
+    const recentFindings = await prisma.finding.findMany({
+      where,
+      take: 5,
+      orderBy: { createdAt: 'desc' },
       select: {
         id: true,
         title: true,
         severity: true,
-        createdAt: true
+        createdAt: true,
+        reporter: {
+          select: {
+            id: true,
+            fullName: true,
+            avatar: true,
+          },
+        },
       },
-      orderBy: { createdAt: 'desc' },
-      take: 5 // Only 5 items!
     });
 
-    // Simple severity breakdown
-    const severityBreakdown = await prisma.finding.groupBy({
-      by: ['severity'],
+    const recentComments = await prisma.comment.findMany({
       where: {
-        companyId: user.companyId!,
-        status: 'OPEN'
+        OR: [
+          { pentest: { ...where } },
+          { finding: { ...where } },
+        ],
       },
-      _count: true
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        text: true,
+        createdAt: true,
+        author: {
+          select: {
+            id: true,
+            fullName: true,
+            avatar: true,
+          },
+        },
+        finding: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
+      },
     });
 
-    const severityData: any = {
-      CRITICAL: 0,
-      HIGH: 0,
-      MEDIUM: 0,
-      LOW: 0,
-      INFO: 0
+    // Build activity feed
+    const activity = [
+      ...recentFindings.map((f) => ({
+        id: f.id,
+        type: 'vulnerability' as const,
+        title: 'New Vulnerability Found',
+        description: f.title,
+        time: f.createdAt,
+        severity: f.severity,
+        user: {
+          name: f.reporter.fullName,
+          avatar: f.reporter.avatar,
+        },
+      })),
+      ...recentComments.map((c) => ({
+        id: c.id,
+        type: 'comment' as const,
+        title: 'New Comment',
+        description: c.finding?.title || 'On pentest',
+        time: c.createdAt,
+        user: {
+          name: c.author.fullName,
+          avatar: c.author.avatar,
+        },
+      })),
+    ]
+      .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+      .slice(0, 10);
+
+    const stats = {
+      totalPentests,
+      activePentests,
+      totalTargets,
+      activeTargets,
+      totalVulnerabilities: totalFindings,
+      openVulnerabilities: openFindings,
+      criticalVulnerabilities: criticalFindings,
+      highVulnerabilities: highFindings,
+      mediumVulnerabilities: mediumFindings,
+      lowVulnerabilities: lowFindings,
+      infoVulnerabilities: infoFindings,
+      findingsByCategory: findingsByCategory.map((item) => ({
+        category: item.category || 'Uncategorized',
+        count: item._count,
+      })),
+      findingsBySeverity,
+      recentActivity: activity,
     };
-    
-    severityBreakdown.forEach((item) => {
-      severityData[item.severity] = item._count;
-    });
 
-    // Return minimal data
-    return successResponse({
-      stats: {
-        criticalFindings,
-        activePentests,
-        highRiskTargets,
-        totalFindings,
-        completedPentests
-      },
-      recentFindings,
-      severityBreakdown: severityData,
-      complianceStatus: {
-        percentage: 92,
-        compliant: 92,
-        total: 100
-      }
-    });
-    
+    return successResponse(stats);
   } catch (error) {
-    console.error('Dashboard API error:', error);
-    return errorResponse('Failed to fetch dashboard data');
+    return handleApiError(error);
   }
 }

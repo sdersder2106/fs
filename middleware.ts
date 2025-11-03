@@ -1,134 +1,81 @@
-import { withAuth } from 'next-auth/middleware';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { getToken } from 'next-auth/jwt';
 
-export default withAuth(
-  function middleware(req: NextRequest) {
-    const token = (req as any).nextauth?.token;
-    const isAuth = !!token;
-    const pathname = req.nextUrl.pathname;
+export async function middleware(request: NextRequest) {
+  const token = await getToken({
+    req: request,
+    secret: process.env.NEXTAUTH_SECRET,
+  });
 
-    // Auth page redirects
-    const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/signup');
+  const { pathname } = request.nextUrl;
 
-    if (isAuthPage) {
-      if (isAuth) {
-        // Already logged in, redirect to dashboard
-        return NextResponse.redirect(new URL('/dashboard', req.url));
-      }
-      // Not logged in, allow access to auth pages
-      return null;
+  // Allow access to auth pages
+  if (
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/signup') ||
+    pathname.startsWith('/api/auth')
+  ) {
+    // Redirect to dashboard if already logged in
+    if (token && (pathname === '/login' || pathname === '/signup')) {
+      return NextResponse.redirect(new URL('/dashboard', request.url));
     }
+    return NextResponse.next();
+  }
 
-    // Must be authenticated beyond this point
-    if (!isAuth) {
-      let from = pathname;
-      if (req.nextUrl.search) {
-        from += req.nextUrl.search;
+  // Protect dashboard and API routes (except /api/auth)
+  if (pathname.startsWith('/dashboard') || pathname.startsWith('/api')) {
+    if (!token) {
+      // Redirect to login if not authenticated
+      if (pathname.startsWith('/dashboard')) {
+        return NextResponse.redirect(new URL('/login', request.url));
       }
-
-      return NextResponse.redirect(
-        new URL(`/login?from=${encodeURIComponent(from)}`, req.url)
+      // Return 401 for API routes
+      return NextResponse.json(
+        { message: 'Unauthorized' },
+        { status: 401 }
       );
     }
 
-    // RBAC - Role-based access control
-    const userRole = token?.role as string;
+    // Role-based access control
+    const userRole = token.role as string;
 
-    // Admin-only routes
-    const adminOnlyRoutes = [
-      '/dashboard/templates',
-      '/dashboard/company-settings',
-      '/api/templates',
-      '/api/companies',
-    ];
-
-    const isAdminRoute = adminOnlyRoutes.some(route => pathname.startsWith(route));
-
-    if (isAdminRoute && userRole !== 'ADMIN') {
-      // Not admin, redirect to dashboard
-      if (pathname.startsWith('/api/')) {
-        // API route - return 403 Forbidden
-        return new NextResponse(
-          JSON.stringify({ error: 'Forbidden', message: 'Admin access required' }),
-          { status: 403, headers: { 'content-type': 'application/json' } }
-        );
-      }
-      return NextResponse.redirect(new URL('/dashboard', req.url));
+    // ADMIN-only routes
+    if (pathname.startsWith('/dashboard/templates') && userRole !== 'ADMIN') {
+      return NextResponse.redirect(new URL('/dashboard', request.url));
     }
 
-    // Pentester and Admin routes
-    const pentesterRoutes = [
-      '/dashboard/pentests/new',
-      '/dashboard/pentests/*/edit',
-      '/dashboard/findings/new',
-      '/dashboard/findings/*/edit',
-      '/api/pentests',
-      '/api/findings',
-    ];
-
-    const isPentesterRoute = pentesterRoutes.some(route => {
-      const pattern = route.replace('*', '.*');
-      return new RegExp(`^${pattern}$`).test(pathname);
-    });
-
-    if (isPentesterRoute && userRole === 'CLIENT') {
-      // Client trying to access pentester route
-      if (pathname.startsWith('/api/')) {
-        // API route - return 403 Forbidden
-        return new NextResponse(
-          JSON.stringify({ error: 'Forbidden', message: 'Pentester access required' }),
-          { status: 403, headers: { 'content-type': 'application/json' } }
-        );
-      }
-      return NextResponse.redirect(new URL('/dashboard', req.url));
-    }
-
-    // Client read-only restrictions
-    if (userRole === 'CLIENT') {
-      // Clients can only use GET methods on most API routes
-      const method = req.method;
-      const isModifyingMethod = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method || '');
-      
-      const clientWritableRoutes = [
-        '/api/comments', // Clients can add comments
-        '/api/auth', // Auth routes
-      ];
-      
-      const isClientWritable = clientWritableRoutes.some(route => pathname.startsWith(route));
-
-      if (isModifyingMethod && pathname.startsWith('/api/') && !isClientWritable) {
-        return new NextResponse(
-          JSON.stringify({ error: 'Forbidden', message: 'Read-only access' }),
-          { status: 403, headers: { 'content-type': 'application/json' } }
-        );
+    // CLIENT company restriction - only access their own company data
+    if (userRole === 'CLIENT' && token.companyId) {
+      const companyIdMatch = pathname.match(/\/(companies|pentests|targets|findings)\/([^\/]+)/);
+      if (companyIdMatch) {
+        const requestedCompanyId = companyIdMatch[2];
+        // Allow if it's the user's company
+        if (requestedCompanyId !== token.companyId) {
+          if (pathname.startsWith('/dashboard')) {
+            return NextResponse.redirect(new URL('/dashboard', request.url));
+          }
+          return NextResponse.json(
+            { message: 'Forbidden: Access denied to this resource' },
+            { status: 403 }
+          );
+        }
       }
     }
-
-    // All checks passed
-    return null;
-  },
-  {
-    callbacks: {
-      authorized: ({ token }) => {
-        // This is called before the middleware function above
-        // Return true to continue to middleware, false to redirect to signin
-        return true; // We handle auth in the middleware function
-      },
-    },
   }
-);
 
-// Configure which routes require authentication
+  return NextResponse.next();
+}
+
 export const config = {
   matcher: [
-    // Protected routes
-    '/dashboard/:path*',
-    '/api/:path*',
-    // Auth routes
-    '/login',
-    '/signup',
-    // Exclude static files and Next.js internals
-    '/((?!_next/static|_next/image|favicon.ico|public).*)',
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - public folder
+     */
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

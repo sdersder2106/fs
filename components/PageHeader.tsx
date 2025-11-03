@@ -1,81 +1,53 @@
 'use client';
 
-import React from 'react';
+import { ReactNode } from 'react';
 import Link from 'next/link';
-import { cn } from '@/lib/utils';
-import { ChevronRight, Home } from 'lucide-react';
-
-interface Breadcrumb {
-  label: string;
-  href?: string;
-}
+import { ArrowLeft } from 'lucide-react';
+import { Button } from '@/components/ui';
 
 interface PageHeaderProps {
   title: string;
   description?: string;
-  breadcrumbs?: Breadcrumb[];
-  actions?: React.ReactNode;
-  badge?: React.ReactNode;
-  className?: string;
+  backHref?: string;
+  backLabel?: string;
+  action?: ReactNode;
 }
 
-const PageHeader: React.FC<PageHeaderProps> = ({
+export default function PageHeader({
   title,
   description,
-  breadcrumbs,
-  actions,
-  badge,
-  className,
-}) => {
+  backHref,
+  backLabel = 'Back',
+  action,
+}: PageHeaderProps) {
   return (
-    <div className={cn('mb-6', className)}>
-      {/* Breadcrumbs */}
-      {breadcrumbs && breadcrumbs.length > 0 && (
-        <nav className="flex items-center space-x-2 text-sm text-gray-500 mb-4">
-          <Link
-            href="/dashboard"
-            className="hover:text-gray-700 transition-colors"
-          >
-            <Home className="w-4 h-4" />
+    <div className="space-y-4">
+      {/* Back Button */}
+      {backHref && (
+        <div>
+          <Link href={backHref}>
+            <Button variant="ghost" className="gap-2">
+              <ArrowLeft className="w-4 h-4" />
+              {backLabel}
+            </Button>
           </Link>
-          {breadcrumbs.map((crumb, index) => (
-            <React.Fragment key={index}>
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-              {crumb.href ? (
-                <Link
-                  href={crumb.href}
-                  className="hover:text-gray-700 transition-colors"
-                >
-                  {crumb.label}
-                </Link>
-              ) : (
-                <span className="text-gray-700 font-medium">{crumb.label}</span>
-              )}
-            </React.Fragment>
-          ))}
-        </nav>
+        </div>
       )}
 
-      {/* Header content */}
-      <div className="flex items-start justify-between">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
-          <div className="flex items-center space-x-3">
-            <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
-            {badge}
-          </div>
+          <h1 className="text-3xl font-bold text-gray-900">{title}</h1>
           {description && (
-            <p className="mt-1 text-gray-500">{description}</p>
+            <p className="text-gray-600 mt-1">{description}</p>
           )}
         </div>
-        
-        {actions && (
-          <div className="ml-6 flex items-center space-x-3">
-            {actions}
+        {action && (
+          <div className="flex-shrink-0">
+            {action}
           </div>
         )}
       </div>
     </div>
   );
-};
-
-export default PageHeader;
+}

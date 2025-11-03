@@ -4,7 +4,6 @@
 /node_modules
 /.pnp
 .pnp.js
-.yarn/install-state.gz
 
 # testing
 /coverage
@@ -28,8 +27,6 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
-.env.production
-.env.development
 
 # vercel
 .vercel
@@ -39,29 +36,8 @@ yarn-error.log*
 next-env.d.ts
 
 # prisma
-prisma/*.db
-prisma/*.db-journal
-prisma/migrations
+/prisma/migrations
 
 # uploads
-/uploads
 /public/uploads
-
-# IDE
-.idea
-.vscode
-*.swp
-*.swo
-*~
-
-# OS
-Thumbs.db
-.DS_Store
-
-# Logs
-logs
-*.log
-
-# Testing
-cypress/videos
-cypress/screenshots
+/uploads

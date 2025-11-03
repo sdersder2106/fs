@@ -1,204 +1,470 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// schema.prisma
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// CORE MODELS
+// ============================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  fullName  String
+  role      String   // ADMIN, CLIENT
+  avatar    String?
+  isActive  Boolean  @default(true)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+  
+  // Relations
+  comments              Comment[]
+  assignedFindings      Finding[]                @relation("AssignedTo")
+  reportedFindings      Finding[]                @relation("Reporter")
+  notifications         Notification[]
+  notificationPreference NotificationPreference?
+  createdTemplates      VulnerabilityTemplate[]
+  generatedReports      Report[]
+  activities            VulnerabilityActivity[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([companyId])
 }
 
 model Company {
-  id          String   @id @default(cuid())
-  name        String
-  domain      String?
-  logo        String?
-  description String?
+  id        String   @id @default(cuid())
+  name      String
+  logo      String?
+  industry  String?
   
-  users       User[]
-  pentests    Pentest[]
-  targets     Target[]
-  findings    Finding[]
-  reports     Report[]
-  templates   Template[]
+  // Relations
+  users        User[]
+  targets      Target[]
+  pentests     Pentest[]
+  findings     Finding[]
+  reports      Report[]
+  compliance   ComplianceResult[]
+  integrations Integration[]
+  templates    VulnerabilityTemplate[]
+  slaConfig    SLAConfiguration?
+  reportTemplates ReportTemplate[]
   
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  password      String
-  fullName      String
-  role          String    // ADMIN, PENTESTER, CLIENT
-  phone         String?
-  avatar        String?
-  bio           String?   @db.Text
-  
-  companyId     String
-  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  
-  pentestsCreated   Pentest[]   @relation("PentestCreator")
-  findingsReported  Finding[]   @relation("Reporter")
-  findingsAssigned  Finding[]   @relation("AssignedTo")
-  comments          Comment[]
-  notifications     Notification[]
-  reportsGenerated  Report[]
-  
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  @@index([name])
 }
 
 model Target {
   id          String   @id @default(cuid())
   name        String
-  type        String   // WEB_APP, API, MOBILE_APP, CLOUD, HOST, NETWORK
+  description String?
+  type        String   // WEB_APP, API, CLOUD, HOST
   url         String?
   ipAddress   String?
-  description String?  @db.Text
-  status      String   // ACTIVE, INACTIVE, ARCHIVED
-  riskScore   Int      @default(0)
-  scope       Json?
+  status      String   // ACTIVE, PENDING, INACTIVE
+  riskScore   Float    @default(0)
+  scope       String[] // Array of in-scope items
   
   companyId   String
   company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   
   pentests    Pentest[]
   findings    Finding[]
+  comments    Comment[]
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([status])
 }
 
 model Pentest {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   title       String
-  description String?  @db.Text
-  status      String   // SCHEDULED, IN_PROGRESS, REPORTED, RESCAN, COMPLETED, CANCELLED
-  progress    Int      @default(0)
+  description String?
+  status      String    // SCHEDULED, IN_PROGRESS, REPORTED, RESCAN, COMPLETED, CANCELLED
+  progress    Float     @default(0)
   startDate   DateTime
   endDate     DateTime
-  methodology String?  @db.Text
   
   targetId    String
-  target      Target   @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  target      Target    @relation(fields: [targetId], references: [id], onDelete: Cascade)
   companyId   String
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  createdById String
-  createdBy   User     @relation("PentestCreator", fields: [createdById], references: [id])
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   
   findings    Finding[]
   reports     Report[]
   comments    Comment[]
   
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([companyId])
+  @@index([status])
+  @@index([targetId])
 }
 
 model Finding {
-  id                String   @id @default(cuid())
+  id                String       @id @default(cuid())
   title             String
-  description       String   @db.Text
-  severity          String   // CRITICAL, HIGH, MEDIUM, LOW, INFO
+  description       String       @db.Text
+  severity          String       // CRITICAL, HIGH, MEDIUM, LOW, INFO
   cvssScore         Float
-  status            String   // OPEN, IN_PROGRESS, RESOLVED, CLOSED
+  status            String       // OPEN, ASSIGNED, IN_PROGRESS, FIX_SUBMITTED, PENDING_VALIDATION, VALIDATED, RESOLVED, CLOSED, REOPENED, WONT_FIX, FALSE_POSITIVE
   category          String?
   
-  // Evidence
-  proofOfConcept    String?  @db.Text
-  reproductionSteps String?  @db.Text
-  requestExample    String?  @db.Text
-  responseExample   String?  @db.Text
-  evidenceImages    String[]
+  // Evidence Section
+  proofOfConcept    String?      @db.Text
+  affectedUrls      String[]
+  reproductionSteps String?      @db.Text
+  requestExample    String?      @db.Text
+  responseExample   String?      @db.Text
+  evidenceImages    String[]     // URLs to uploaded images
   
   // Remediation
-  remediation       String?  @db.Text
-  remediationCode   String?  @db.Text
+  remediation       String?      @db.Text
+  remediationCode   String?      @db.Text
   references        String[]
   
-  pentestId     String
-  pentest       Pentest  @relation(fields: [pentestId], references: [id], onDelete: Cascade)
-  targetId      String
-  target        Target   @relation(fields: [targetId], references: [id], onDelete: Cascade)
-  companyId     String
-  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  reporterId    String
-  reporter      User     @relation("Reporter", fields: [reporterId], references: [id])
-  assignedToId  String?
-  assignedTo    User?    @relation("AssignedTo", fields: [assignedToId], references: [id])
+  // SLA & Workflow
+  slaDeadline       DateTime?
+  slaBreach         Boolean      @default(false)
+  fixSubmittedAt    DateTime?
+  fixSubmittedBy    String?
+  fixDescription    String?      @db.Text
+  fixProofUrls      String[]
+  validatedAt       DateTime?
+  validatedBy       String?
+  validationNotes   String?      @db.Text
+  reopenCount       Int          @default(0)
   
-  comments      Comment[]
+  // Relations
+  pentestId         String
+  pentest           Pentest      @relation(fields: [pentestId], references: [id], onDelete: Cascade)
+  targetId          String
+  target            Target       @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  companyId         String
+  company           Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  reporterId        String
+  reporter          User         @relation("Reporter", fields: [reporterId], references: [id])
+  assignedToId      String?
+  assignedTo        User?        @relation("AssignedTo", fields: [assignedToId], references: [id])
   
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  comments          Comment[]
+  activityLog       VulnerabilityActivity[]
+  externalTickets   ExternalTicket[]
+  
+  firstFound        DateTime?
+  dueDate           DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([companyId])
+  @@index([pentestId])
+  @@index([severity])
+  @@index([status])
+  @@index([assignedToId])
 }
 
 model Comment {
-  id          String   @id @default(cuid())
-  text        String   @db.Text
+  id          String    @id @default(cuid())
+  text        String    @db.Text
   
-  pentestId   String?
-  pentest     Pentest? @relation(fields: [pentestId], references: [id], onDelete: Cascade)
-  findingId   String?
-  finding     Finding? @relation(fields: [findingId], references: [id], onDelete: Cascade)
   authorId    String
-  author      User     @relation(fields: [authorId], references: [id])
+  author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
   
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  // Polymorphic relations
+  pentestId   String?
+  pentest     Pentest?  @relation(fields: [pentestId], references: [id], onDelete: Cascade)
+  findingId   String?
+  finding     Finding?  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  targetId    String?
+  target      Target?   @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  
+  attachments String[]  // URLs to uploaded files
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([pentestId])
+  @@index([findingId])
+  @@index([targetId])
+  @@index([authorId])
 }
 
 model Report {
   id              String   @id @default(cuid())
   title           String
-  reportType      String   // EXECUTIVE, TECHNICAL, FULL
-  status          String   // DRAFT, FINAL, APPROVED
-  format          String   // PDF, DOCX, HTML
-  fileUrl         String?
+  reportType      String   // EXECUTIVE, TECHNICAL, COMPLIANCE, CUSTOM
+  status          String   // DRAFT, REVIEW, FINAL
+  version         Int      @default(1)
   
   pentestId       String
   pentest         Pentest  @relation(fields: [pentestId], references: [id], onDelete: Cascade)
   companyId       String
   company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   
+  // Sections configuration
+  sections        Json?
+  branding        Json?
+  
+  // Content
+  executiveSummary String? @db.Text
+  methodology      String? @db.Text
+  customSections   Json?
+  
+  // Files
+  pdfUrl          String?
+  docxUrl         String?
+  htmlUrl         String?
+  
   generatedAt     DateTime?
   generatedBy     String?
   generator       User?    @relation(fields: [generatedBy], references: [id])
+  
+  // Version control
+  parentReportId  String?
+  parentReport    Report?  @relation("ReportVersions", fields: [parentReportId], references: [id])
+  childReports    Report[] @relation("ReportVersions")
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([pentestId])
+  @@index([status])
+}
+
+model ComplianceResult {
+  id          String   @id @default(cuid())
+  standard    String   // SOC2, PCI_DSS, ISO_27001, GDPR, HIPAA, OWASP_2021
+  score       Float
+  status      String   // PASSED, FAILED
+  passedCount Int
+  failedCount Int
+  totalTests  Int
+  
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  testDate    DateTime @default(now())
+  details     String?  @db.Text
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([standard])
+}
+
+// ============================================
+// NEW FEATURES MODELS
+// ============================================
+
+model Notification {
+  id          String    @id @default(cuid())
+  type        String    // NEW_VULN, COMMENT, STATUS_CHANGE, DEADLINE, REPORT, ASSIGNMENT
+  title       String
+  message     String    @db.Text
+  link        String?
+  isRead      Boolean   @default(false)
+  
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  metadata    Json?
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+model NotificationPreference {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  emailEnabled    Boolean  @default(true)
+  pushEnabled     Boolean  @default(true)
+  dailyDigest     Boolean  @default(false)
+  notifyOnComment Boolean  @default(true)
+  notifyOnAssign  Boolean  @default(true)
+  notifyOnStatus  Boolean  @default(true)
+  notifyOnDeadline Boolean @default(true)
   
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
 
-model Template {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  type        String   // FINDING, REPORT
-  category    String?
-  content     String   @db.Text
-  isPublic    Boolean  @default(false)
+model VulnerabilityActivity {
+  id            String    @id @default(cuid())
   
-  companyId   String
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  findingId     String
+  finding       Finding   @relation(fields: [findingId], references: [id], onDelete: Cascade)
   
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  action        String    // STATUS_CHANGE, COMMENT, ASSIGNMENT, FIX_SUBMITTED, VALIDATED
+  oldValue      String?
+  newValue      String?
+  
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  
+  notes         String?   @db.Text
+  
+  createdAt     DateTime  @default(now())
+
+  @@index([findingId])
+  @@index([createdAt])
 }
 
-model Notification {
-  id          String   @id @default(cuid())
-  title       String
-  message     String   @db.Text
-  type        String   // INFO, WARNING, SUCCESS, ERROR
-  isRead      Boolean  @default(false)
-  link        String?
+model SLAConfiguration {
+  id              String   @id @default(cuid())
   
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId       String   @unique
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   
-  createdAt   DateTime @default(now())
+  criticalDays    Int      @default(7)
+  highDays        Int      @default(14)
+  mediumDays      Int      @default(30)
+  lowDays         Int      @default(60)
+  autoEscalate    Boolean  @default(true)
+  escalationEmail String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model VulnerabilityTemplate {
+  id                String   @id @default(cuid())
+  name              String
+  description       String   @db.Text
+  category          String
+  severity          String
+  cvssScoreMin      Float
+  cvssScoreMax      Float
+  remediation       String   @db.Text
+  remediationCode   String?  @db.Text
+  references        String[]
+  cweId             String?
+  owaspCategory     String?
+  
+  isPublic          Boolean  @default(true)
+  isCustom          Boolean  @default(false)
+  
+  createdBy         String?
+  creator           User?    @relation(fields: [createdBy], references: [id])
+  companyId         String?
+  company           Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  usageCount        Int      @default(0)
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([category])
+  @@index([severity])
+  @@index([isPublic])
+}
+
+model ReportTemplate {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  reportType      String
+  sections        Json
+  isPublic        Boolean  @default(false)
+  
+  companyId       String?
+  company         Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([reportType])
+}
+
+model Integration {
+  id              String   @id @default(cuid())
+  
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  type            String   // SLACK, JIRA, LINEAR, GITHUB
+  isEnabled       Boolean  @default(true)
+  config          Json
+  
+  // Slack
+  slackWorkspaceId String?
+  slackChannel    String?
+  slackWebhookUrl String?
+  
+  // Jira
+  jiraUrl         String?
+  jiraProject     String?
+  jiraIssueType   String?
+  
+  // Linear
+  linearTeamId    String?
+  linearApiKey    String?
+  
+  logs            IntegrationLog[]
+  externalTickets ExternalTicket[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([type])
+}
+
+model IntegrationLog {
+  id            String      @id @default(cuid())
+  
+  integrationId String
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  
+  action        String
+  status        String
+  errorMessage  String?     @db.Text
+  metadata      Json?
+  
+  createdAt     DateTime    @default(now())
+
+  @@index([integrationId])
+  @@index([createdAt])
+}
+
+model ExternalTicket {
+  id              String      @id @default(cuid())
+  
+  findingId       String
+  finding         Finding     @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  
+  integrationId   String
+  integration     Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  
+  externalId      String
+  externalUrl     String
+  lastSyncedAt    DateTime?
+  
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([findingId])
+  @@index([integrationId])
 }

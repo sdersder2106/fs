@@ -1,176 +1,90 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
-import { requireAuth } from '@/lib/auth-helpers';
-import { 
-  successResponse, 
-  errorResponse, 
-  unauthorizedResponse 
-} from '@/lib/api-response';
-import crypto from 'crypto';
+import { getAuthUser } from '@/lib/auth-helpers';
+import { handleApiError, successResponse, errorResponse } from '@/lib/api-response';
 
-// Configuration
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-const ALLOWED_DOCUMENT_TYPES = [
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'text/plain',
-  'text/csv',
-];
-
+// POST /api/upload - Upload file
 export async function POST(request: NextRequest) {
   try {
-    const user = await requireAuth();
+    const user = await getAuthUser();
 
-    // Parse multipart form data
     const formData = await request.formData();
     const file = formData.get('file') as File;
-    const type = formData.get('type') as string || 'general';
 
     if (!file) {
       return errorResponse('No file provided', 400);
     }
 
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
-      return errorResponse(`File size exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit`, 400);
+    // Validate file size (10MB max)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      return errorResponse('File size exceeds 10MB limit', 400);
     }
 
-    // Validate file type based on upload type
-    const allowedTypes = type === 'image' 
-      ? ALLOWED_IMAGE_TYPES 
-      : [...ALLOWED_IMAGE_TYPES, ...ALLOWED_DOCUMENT_TYPES];
+    // Validate file type (images and PDFs only)
+    const allowedTypes = [
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+      'image/gif',
+      'image/webp',
+      'application/pdf',
+    ];
 
     if (!allowedTypes.includes(file.type)) {
-      return errorResponse('File type not allowed', 400);
+      return errorResponse('Invalid file type. Only images and PDFs are allowed', 400);
     }
 
     // Generate unique filename
-    const fileExtension = file.name.split('.').pop();
-    const uniqueId = crypto.randomBytes(16).toString('hex');
     const timestamp = Date.now();
-    const filename = `${timestamp}-${uniqueId}.${fileExtension}`;
+    const randomString = Math.random().toString(36).substring(7);
+    const extension = file.name.split('.').pop();
+    const filename = `${timestamp}-${randomString}.${extension}`;
 
-    // Determine upload directory based on type
-    const uploadDir = join(process.cwd(), 'public', 'uploads', type);
-    
-    // Ensure upload directory exists
+    // Create upload directory if it doesn't exist
+    const uploadDir = join(process.cwd(), 'public', 'uploads');
     await mkdir(uploadDir, { recursive: true });
 
     // Save file
+    const buffer = Buffer.from(await file.arrayBuffer());
     const filepath = join(uploadDir, filename);
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-    
     await writeFile(filepath, buffer);
 
-    // Generate public URL
-    const publicUrl = `/uploads/${type}/${filename}`;
+    // Return file URL
+    const fileUrl = `/uploads/${filename}`;
 
-    // Return file information
-    const uploadedFile = {
-      id: uniqueId,
-      filename,
-      originalName: file.name,
-      mimetype: file.type,
+    return successResponse({
+      url: fileUrl,
+      filename: file.name,
       size: file.size,
-      url: publicUrl,
-      type,
+      mimeType: file.type,
+      uploadedAt: new Date(),
       uploadedBy: user.id,
-      uploadedAt: new Date().toISOString(),
-    };
-
-    return successResponse(uploadedFile, 'File uploaded successfully');
+    }, 201);
   } catch (error) {
-    console.error('Error uploading file:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-    }
-    
-    return errorResponse('Failed to upload file', 500);
+    return handleApiError(error);
   }
 }
 
-// GET /api/upload?file=filename - Get file metadata
-export async function GET(request: NextRequest) {
+// GET /api/upload - Get upload info (optional)
+export async function GET() {
   try {
-    await requireAuth();
-    
-    const params = new URL(request.url).searchParams;
-    const filename = params.get('file');
+    await getAuthUser();
 
-    if (!filename) {
-      return errorResponse('Filename is required', 400);
-    }
-
-    // In a production environment, you would store file metadata in the database
-    // For now, we'll return basic information
-    
-    // Security: Prevent directory traversal
-    const sanitizedFilename = filename.replace(/[^a-zA-Z0-9.-]/g, '');
-    
-    // Check if file exists (simplified - in production, check database)
-    const fileInfo = {
-      filename: sanitizedFilename,
-      url: `/uploads/${sanitizedFilename}`,
-      message: 'File metadata would be retrieved from database in production',
-    };
-
-    return successResponse(fileInfo);
+    return successResponse({
+      maxFileSize: 10 * 1024 * 1024, // 10MB
+      allowedTypes: [
+        'image/jpeg',
+        'image/jpg',
+        'image/png',
+        'image/gif',
+        'image/webp',
+        'application/pdf',
+      ],
+      uploadPath: '/uploads',
+    });
   } catch (error) {
-    console.error('Error fetching file info:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-    }
-    
-    return errorResponse('Failed to fetch file information', 500);
-  }
-}
-
-// DELETE /api/upload?file=filename - Delete file
-export async function DELETE(request: NextRequest) {
-  try {
-    const user = await requireAuth();
-    
-    const params = new URL(request.url).searchParams;
-    const filename = params.get('file');
-
-    if (!filename) {
-      return errorResponse('Filename is required', 400);
-    }
-
-    // In production, verify user has permission to delete this file
-    // by checking database records
-
-    // Security: Prevent directory traversal
-    const sanitizedFilename = filename.replace(/[^a-zA-Z0-9.-]/g, '');
-    
-    // Note: In production, also delete from filesystem
-    // For now, we'll just return success
-    
-    return successResponse(
-      { filename: sanitizedFilename },
-      'File deleted successfully'
-    );
-  } catch (error) {
-    console.error('Error deleting file:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-    }
-    
-    return errorResponse('Failed to delete file', 500);
+    return handleApiError(error);
   }
 }

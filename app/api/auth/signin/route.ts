@@ -1,75 +1,68 @@
 import { NextRequest, NextResponse } from 'next/server';
-import bcrypt from 'bcryptjs';
-import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { loginSchema } from '@/lib/validations';
-import { successResponse, errorResponse, validationErrorResponse } from '@/lib/api-response';
+import bcrypt from 'bcryptjs';
 
-// This is a backup signin route in case NextAuth has issues
-// The main authentication should go through NextAuth
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const { email, password } = body;
 
-    // Validate input
-    const validationResult = loginSchema.safeParse(body);
-    
-    if (!validationResult.success) {
-      const errors: Record<string, string[]> = {};
-      validationResult.error.errors.forEach((err) => {
-        const path = err.path.join('.');
-        if (!errors[path]) {
-          errors[path] = [];
-        }
-        errors[path].push(err.message);
-      });
-      return validationErrorResponse(errors);
+    // Validation
+    if (!email || !password) {
+      return NextResponse.json(
+        { message: 'Email and password are required' },
+        { status: 400 }
+      );
     }
-
-    const { email, password } = validationResult.data;
 
     // Find user
     const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-      include: {
-        company: true,
-      },
+      where: { email },
+      include: { company: true },
     });
 
     if (!user) {
-      return errorResponse('Invalid email or password', 401);
+      return NextResponse.json(
+        { message: 'Invalid credentials' },
+        { status: 401 }
+      );
+    }
+
+    // Check if active
+    if (!user.isActive) {
+      return NextResponse.json(
+        { message: 'Account is inactive' },
+        { status: 403 }
+      );
     }
 
     // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
-      return errorResponse('Invalid email or password', 401);
+      return NextResponse.json(
+        { message: 'Invalid credentials' },
+        { status: 401 }
+      );
     }
 
-    // Update last login (optional)
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { updatedAt: new Date() },
-    });
-
     // Return user data (without password)
-    const userData = {
-      id: user.id,
-      email: user.email,
-      fullName: user.fullName,
-      role: user.role,
-      company: {
-        id: user.company.id,
-        name: user.company.name,
-        domain: user.company.domain,
+    return NextResponse.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        companyId: user.companyId,
+        companyName: user.company?.name,
+        avatar: user.avatar,
       },
-      message: 'Please use NextAuth for proper session management',
-    };
-
-    return successResponse(userData, 'Login successful');
+    });
   } catch (error) {
     console.error('Signin error:', error);
-    return errorResponse('Failed to sign in', 500);
+    return NextResponse.json(
+      { message: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

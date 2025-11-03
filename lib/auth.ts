@@ -10,34 +10,27 @@ export const authOptions: NextAuthOptions = {
     CredentialsProvider({
       name: 'Credentials',
       credentials: {
-        email: { 
-          label: 'Email', 
-          type: 'email',
-          placeholder: 'email@example.com'
-        },
-        password: { 
-          label: 'Password', 
-          type: 'password',
-          placeholder: '••••••••'
-        },
+        email: { label: 'Email', type: 'email' },
+        password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
-          throw new Error('Invalid credentials');
+          throw new Error('Email and password are required');
         }
 
         // Find user by email
         const user = await prisma.user.findUnique({
-          where: { 
-            email: credentials.email.toLowerCase() 
-          },
-          include: { 
-            company: true 
-          },
+          where: { email: credentials.email },
+          include: { company: true },
         });
 
-        if (!user || !user.password) {
+        if (!user) {
           throw new Error('Invalid credentials');
+        }
+
+        // Check if user is active
+        if (!user.isActive) {
+          throw new Error('Account is inactive');
         }
 
         // Verify password
@@ -50,15 +43,15 @@ export const authOptions: NextAuthOptions = {
           throw new Error('Invalid credentials');
         }
 
-        // Return user object for JWT
+        // Return user object (without password)
         return {
           id: user.id,
           email: user.email,
           name: user.fullName,
           role: user.role,
           companyId: user.companyId,
-          companyName: user.company.name,
-          image: user.avatar,
+          companyName: user.company?.name,
+          avatar: user.avatar,
         };
       },
     }),
@@ -67,69 +60,35 @@ export const authOptions: NextAuthOptions = {
     strategy: 'jwt',
     maxAge: 30 * 24 * 60 * 60, // 30 days
   },
-  jwt: {
-    maxAge: 30 * 24 * 60 * 60, // 30 days
-  },
   pages: {
     signIn: '/login',
     signOut: '/login',
     error: '/login',
-    verifyRequest: '/login',
   },
   callbacks: {
-    async jwt({ token, user, trigger, session }) {
-      // Initial sign in
+    async jwt({ token, user }) {
+      // Add user info to token on sign in
       if (user) {
         token.id = user.id;
-        token.email = user.email;
-        token.name = user.name;
         token.role = user.role;
         token.companyId = user.companyId;
         token.companyName = user.companyName;
-        token.image = user.image;
+        token.avatar = user.avatar;
       }
-
-      // Update session
-      if (trigger === 'update' && session) {
-        token.name = session.name;
-        token.email = session.email;
-        token.image = session.image;
-      }
-
       return token;
     },
     async session({ session, token }) {
+      // Add user info to session
       if (session.user) {
         session.user.id = token.id as string;
         session.user.role = token.role as string;
-        session.user.companyId = token.companyId as string;
-        session.user.companyName = token.companyName as string;
+        session.user.companyId = token.companyId as string | undefined;
+        session.user.companyName = token.companyName as string | undefined;
+        session.user.avatar = token.avatar as string | undefined;
       }
-
       return session;
     },
-    async redirect({ url, baseUrl }) {
-      // Allows relative callback URLs
-      if (url.startsWith('/')) {
-        return `${baseUrl}${url}`;
-      }
-      // Allows callback URLs on the same origin
-      else if (new URL(url).origin === baseUrl) {
-        return url;
-      }
-      return baseUrl + '/dashboard';
-    },
   },
-  events: {
-    async signIn({ user, account, profile }) {
-      console.log(`User ${user.email} signed in`);
-    },
-    async signOut({ session, token }) {
-      console.log(`User signed out`);
-    },
-  },
+  secret: process.env.NEXTAUTH_SECRET,
   debug: process.env.NODE_ENV === 'development',
 };
-
-// Helper function to get server session
-export { getServerSession } from 'next-auth';

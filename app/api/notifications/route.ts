@@ -1,149 +1,68 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAuth } from '@/lib/auth-helpers';
-import { 
-  successResponse, 
-  errorResponse, 
-  unauthorizedResponse,
-  getPaginationParams,
-  getQueryParams,
-  paginatedResponse
-} from '@/lib/api-response';
-import { 
-  getUserNotifications, 
-  getNotificationCount,
-  deleteOldNotifications 
-} from '@/lib/notifications';
+import { getAuthUser } from '@/lib/auth-helpers';
+import { createNotificationSchema } from '@/lib/validations';
+import { handleApiError, successResponse, paginatedResponse } from '@/lib/api-response';
 
-// GET /api/notifications - List user notifications
+// GET /api/notifications - List user's notifications
 export async function GET(request: NextRequest) {
   try {
-    const user = await requireAuth();
-    const params = getQueryParams(request);
-    const { page, limit, skip } = getPaginationParams(params);
-    
-    // Parse filters
-    const filters = {
-      type: params.get('type'),
-      isRead: params.get('isRead'),
-      query: params.get('query'),
+    const user = await getAuthUser();
+    const { searchParams } = new URL(request.url);
+
+    // Pagination
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = parseInt(searchParams.get('limit') || '20');
+    const skip = (page - 1) * limit;
+
+    // Filters
+    const unreadOnly = searchParams.get('unreadOnly') === 'true';
+    const type = searchParams.get('type');
+
+    // Build where clause - only user's notifications
+    const where: any = {
+      userId: user.id,
     };
 
-    // Build where clause
-    const where: any = { userId: user.id };
-
-    if (filters.type) {
-      where.type = filters.type;
+    if (unreadOnly) {
+      where.isRead = false;
     }
 
-    if (filters.isRead !== null) {
-      where.isRead = filters.isRead === 'true';
+    if (type) {
+      where.type = type;
     }
 
-    if (filters.query) {
-      where.OR = [
-        { title: { contains: filters.query, mode: 'insensitive' } },
-        { message: { contains: filters.query, mode: 'insensitive' } },
-      ];
-    }
+    // Get total count
+    const total = await prisma.notification.count({ where });
 
     // Get notifications
-    const [notifications, total, unreadCount] = await Promise.all([
-      prisma.notification.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.notification.count({ where }),
-      getNotificationCount(user.id, true),
-    ]);
+    const notifications = await prisma.notification.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+    });
 
-    // Auto-cleanup old read notifications (older than 30 days)
-    await deleteOldNotifications(user.id, 30);
-
-    // Format notifications with additional metadata
-    const formattedNotifications = notifications.map(notification => ({
-      ...notification,
-      isNew: !notification.isRead && 
-        (Date.now() - notification.createdAt.getTime()) < 24 * 60 * 60 * 1000, // Less than 24 hours
-    }));
-
-    // Return with additional metadata
-    const response = {
-      items: formattedNotifications,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-      unreadCount,
-      hasUnread: unreadCount > 0,
-    };
-
-    return successResponse(response);
+    return paginatedResponse(notifications, page, limit, total);
   } catch (error) {
-    console.error('Error fetching notifications:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-    }
-    
-    return errorResponse('Failed to fetch notifications', 500);
+    return handleApiError(error);
   }
 }
 
-// POST /api/notifications - Create notification (internal use)
+// POST /api/notifications - Create new notification
 export async function POST(request: NextRequest) {
   try {
-    const user = await requireAuth();
-    
-    // Only allow creating notifications for system/admin actions
-    if (user.role !== 'ADMIN') {
-      return errorResponse('Only admins can create notifications', 403);
-    }
+    await getAuthUser();
 
     const body = await request.json();
-    const { userId, title, message, type, link } = body;
+    const validatedData = createNotificationSchema.parse(body);
 
-    if (!userId || !title || !message) {
-      return errorResponse('Missing required fields', 400);
-    }
-
-    // Verify target user exists and belongs to same company
-    const targetUser = await prisma.user.findFirst({
-      where: {
-        id: userId,
-        companyId: user.companyId,
-      },
-    });
-
-    if (!targetUser) {
-      return errorResponse('Target user not found', 404);
-    }
-
-    // Create notification
     const notification = await prisma.notification.create({
-      data: {
-        userId,
-        title,
-        message,
-        type: type || 'INFO',
-        link,
-      },
+      data: validatedData,
     });
 
-    return successResponse(notification, 'Notification created successfully');
+    return successResponse(notification, 201);
   } catch (error) {
-    console.error('Error creating notification:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-    }
-    
-    return errorResponse('Failed to create notification', 500);
+    return handleApiError(error);
   }
 }
