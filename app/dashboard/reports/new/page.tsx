@@ -25,7 +25,8 @@ import {
   Lock,
   Unlock,
   Copy,
-  Edit
+  Edit,
+  X
 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';

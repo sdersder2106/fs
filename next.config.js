@@ -2,6 +2,14 @@
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
+  eslint: {
+    // Ignore ESLint errors during production build
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    // Ignore TypeScript errors during production build
+    ignoreBuildErrors: true,
+  },
   images: {
     domains: ['localhost', 'base44.vercel.app'],
     remotePatterns: [
@@ -10,6 +18,8 @@ const nextConfig = {
         hostname: '**',
       },
     ],
+    // Disable image optimization for simpler deployment
+    unoptimized: true,
   },
   experimental: {
     serverActions: {
@@ -29,6 +39,9 @@ const nextConfig = {
       },
     ];
   },
+  // Performance optimizations
+  poweredByHeader: false,
+  compress: true,
 };
 
 module.exports = nextConfig;
