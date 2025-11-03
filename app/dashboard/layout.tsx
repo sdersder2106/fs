@@ -3,10 +3,6 @@
 import { useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-
-// Force dynamic rendering for all dashboard pages
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 import Link from 'next/link';
 import Image from 'next/image';
 import { 
