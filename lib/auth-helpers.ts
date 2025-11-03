@@ -104,3 +104,16 @@ export async function requireCompanyAccessApi(companyId: string): Promise<Sessio
   
   return user;
 }
+
+/**
+ * Require PENTESTER or ADMIN role (for API routes)
+ */
+export async function requirePentester(): Promise<SessionUser> {
+  const user = await getAuthUser();
+  
+  if (user.role !== 'PENTESTER' && user.role !== 'ADMIN') {
+    throw new Error('Forbidden: Pentester or Admin access required');
+  }
+  
+  return user;
+}

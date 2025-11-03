@@ -168,3 +168,78 @@ export async function notifyMultipleUsers(
 
   return Promise.all(promises);
 }
+
+/**
+ * Notification templates for common messages
+ */
+export const notificationTemplates = {
+  reportGenerated: (reportTitle: string) => ({
+    title: 'Report Generated',
+    message: `Report "${reportTitle}" has been generated and is ready for review.`,
+  }),
+  vulnerabilityFound: (title: string, severity: string) => ({
+    title: 'New Vulnerability Found',
+    message: `A ${severity} severity vulnerability was found: ${title}`,
+  }),
+  statusChanged: (resource: string, oldStatus: string, newStatus: string) => ({
+    title: 'Status Updated',
+    message: `${resource} status changed from ${oldStatus} to ${newStatus}`,
+  }),
+};
+
+/**
+ * Notify all users of a company
+ */
+export async function notifyCompanyUsers(
+  companyId: string,
+  params: Omit<CreateNotificationParams, 'userId'>
+) {
+  // Get all users from the company
+  const users = await prisma.user.findMany({
+    where: { companyId },
+    select: { id: true },
+  });
+
+  const userIds = users.map(u => u.id);
+  return notifyMultipleUsers(userIds, params);
+}
+
+/**
+ * Notification templates for common scenarios
+ */
+export const notificationTemplates = {
+  REPORT_GENERATED: {
+    type: 'REPORT' as const,
+    title: 'Report Generated',
+    getMessage: (reportTitle: string) => `Report "${reportTitle}" has been generated and is ready for review`
+  },
+  NEW_VULNERABILITY: {
+    type: 'NEW_VULN' as const,
+    title: 'New Vulnerability Found',
+    getMessage: (severity: string, title: string) => `A ${severity} severity vulnerability was found: ${title}`
+  },
+  STATUS_CHANGED: {
+    type: 'STATUS_CHANGE' as const,
+    title: 'Status Updated',
+    getMessage: (resourceType: string, title: string, oldStatus: string, newStatus: string) => 
+      `${resourceType} "${title}" status changed from ${oldStatus} to ${newStatus}`
+  }
+};
+
+/**
+ * Notify all users in a company
+ */
+export async function notifyCompanyUsers(
+  companyId: string,
+  params: Omit<CreateNotificationParams, 'userId'>
+) {
+  const users = await prisma.user.findMany({
+    where: { companyId },
+    select: { id: true }
+  });
+  
+  return notifyMultipleUsers(
+    users.map(u => u.id),
+    params
+  );
+}

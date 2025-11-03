@@ -172,3 +172,17 @@ export function paginatedResponse<T>(
     },
   });
 }
+
+/**
+ * Extract query parameters from request URL
+ */
+export function getQueryParams(request: Request) {
+  const url = new URL(request.url);
+  const params: Record<string, string> = {};
+  
+  url.searchParams.forEach((value, key) => {
+    params[key] = value;
+  });
+  
+  return params;
+}
