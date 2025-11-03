@@ -42,6 +42,8 @@ const nextConfig = {
   // Performance optimizations
   poweredByHeader: false,
   compress: true,
+  // Disable static optimization for authenticated pages
+  output: 'standalone',
 };
 
 module.exports = nextConfig;

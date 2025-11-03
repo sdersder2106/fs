@@ -9,6 +9,10 @@ import {
 } from '@/lib/api-response';
 import { subDays, startOfDay, endOfDay } from 'date-fns';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET(request: NextRequest) {
   try {
     const user = await requireAuth();

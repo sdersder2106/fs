@@ -8,6 +8,10 @@ import {
   getQueryParams 
 } from '@/lib/api-response';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 interface SearchResult {
   id: string;
   type: 'pentest' | 'target' | 'finding' | 'report';
