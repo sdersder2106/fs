@@ -1,109 +1,113 @@
 import { z } from 'zod';
 
-// ============================================
-// AUTH SCHEMAS
-// ============================================
+// Auth schemas
+export const loginSchema = z.object({
+  email: z.string().email('Invalid email address'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+});
 
 export const signupSchema = z.object({
+  email: z.string().email('Invalid email address'),
+  password: z.string()
+    .min(8, 'Password must be at least 8 characters')
+    .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+    .regex(/[0-9]/, 'Password must contain at least one number'),
+  confirmPassword: z.string(),
   fullName: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Invalid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
-  companyName: z.string().optional(),
-  role: z.enum(['ADMIN', 'CLIENT']).default('CLIENT'),
+  companyName: z.string().min(2, 'Company name must be at least 2 characters').optional(),
+  acceptTerms: z.boolean().refine(val => val === true, 'You must accept the terms'),
+}).refine(data => data.password === data.confirmPassword, {
+  message: 'Passwords do not match',
+  path: ['confirmPassword'],
 });
 
-export const signinSchema = z.object({
-  email: z.string().email('Invalid email address'),
-  password: z.string().min(1, 'Password is required'),
+export const updatePasswordSchema = z.object({
+  currentPassword: z.string().min(6),
+  newPassword: z.string()
+    .min(8, 'Password must be at least 8 characters')
+    .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+    .regex(/[0-9]/, 'Password must contain at least one number'),
+  confirmPassword: z.string(),
+}).refine(data => data.newPassword === data.confirmPassword, {
+  message: 'Passwords do not match',
+  path: ['confirmPassword'],
 });
 
-// ============================================
-// COMPANY SCHEMAS
-// ============================================
-
+// Company schemas
 export const createCompanySchema = z.object({
   name: z.string().min(2, 'Company name must be at least 2 characters'),
-  logo: z.string().url().optional(),
-  industry: z.string().optional(),
-});
-
-export const updateCompanySchema = z.object({
-  name: z.string().min(2).optional(),
-  logo: z.string().url().optional(),
-  industry: z.string().optional(),
-});
-
-// ============================================
-// TARGET SCHEMAS
-// ============================================
-
-export const createTargetSchema = z.object({
-  name: z.string().min(2, 'Target name is required'),
+  domain: z.string().optional(),
+  logo: z.string().url('Invalid logo URL').optional().or(z.literal('')),
   description: z.string().optional(),
-  type: z.enum(['WEB_APP', 'API', 'CLOUD', 'HOST']),
-  url: z.string().url().optional(),
-  ipAddress: z.string().ip().optional(),
-  status: z.enum(['ACTIVE', 'PENDING', 'INACTIVE']).default('PENDING'),
-  riskScore: z.number().min(0).max(100).default(0),
-  scope: z.array(z.string()).default([]),
-  companyId: z.string().cuid(),
 });
 
-export const updateTargetSchema = createTargetSchema.partial().omit({ companyId: true });
+export const updateCompanySchema = createCompanySchema.partial();
 
-// ============================================
-// PENTEST SCHEMAS
-// ============================================
+// User schemas
+export const updateProfileSchema = z.object({
+  fullName: z.string().min(2, 'Name must be at least 2 characters'),
+  phone: z.string().regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number').optional().or(z.literal('')),
+  bio: z.string().max(500, 'Bio must be less than 500 characters').optional(),
+  avatar: z.string().url('Invalid avatar URL').optional().or(z.literal('')),
+});
 
+// Pentest schemas
 export const createPentestSchema = z.object({
-  title: z.string().min(2, 'Title is required'),
+  title: z.string().min(3, 'Title must be at least 3 characters'),
   description: z.string().optional(),
-  status: z.enum(['SCHEDULED', 'IN_PROGRESS', 'REPORTED', 'RESCAN', 'COMPLETED', 'CANCELLED']).default('SCHEDULED'),
+  status: z.enum(['SCHEDULED', 'IN_PROGRESS', 'REPORTED', 'RESCAN', 'COMPLETED', 'CANCELLED']),
   progress: z.number().min(0).max(100).default(0),
   startDate: z.string().datetime().or(z.date()),
   endDate: z.string().datetime().or(z.date()),
+  methodology: z.string().optional(),
   targetId: z.string().cuid(),
   companyId: z.string().cuid(),
 });
 
-export const updatePentestSchema = createPentestSchema.partial().omit({ companyId: true });
+export const updatePentestSchema = createPentestSchema.partial().extend({
+  id: z.string().cuid(),
+});
 
-// ============================================
-// FINDING (VULNERABILITY) SCHEMAS
-// ============================================
+// Target schemas
+export const createTargetSchema = z.object({
+  name: z.string().min(2, 'Target name must be at least 2 characters'),
+  type: z.enum(['WEB_APP', 'API', 'MOBILE_APP', 'CLOUD', 'HOST', 'NETWORK']),
+  url: z.string().url('Invalid URL').optional().or(z.literal('')),
+  ipAddress: z.string()
+    .regex(/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\/\d{1,2})?$/, 'Invalid IP address')
+    .optional()
+    .or(z.literal('')),
+  description: z.string().optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).default('ACTIVE'),
+  riskScore: z.number().min(0).max(100).default(0),
+  scope: z.any().optional(), // JSON field
+  companyId: z.string().cuid(),
+});
 
+export const updateTargetSchema = createTargetSchema.partial().extend({
+  id: z.string().cuid(),
+});
+
+// Finding schemas
 export const createFindingSchema = z.object({
-  title: z.string().min(2, 'Title is required'),
+  title: z.string().min(3, 'Title must be at least 3 characters'),
   description: z.string().min(10, 'Description must be at least 10 characters'),
   severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']),
   cvssScore: z.number().min(0).max(10),
-  status: z.enum([
-    'OPEN',
-    'ASSIGNED',
-    'IN_PROGRESS',
-    'FIX_SUBMITTED',
-    'PENDING_VALIDATION',
-    'VALIDATED',
-    'RESOLVED',
-    'CLOSED',
-    'REOPENED',
-    'WONT_FIX',
-    'FALSE_POSITIVE'
-  ]).default('OPEN'),
+  status: z.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']).default('OPEN'),
   category: z.string().optional(),
   
-  // Evidence
+  // Evidence fields
   proofOfConcept: z.string().optional(),
-  affectedUrls: z.array(z.string()).default([]),
   reproductionSteps: z.string().optional(),
   requestExample: z.string().optional(),
   responseExample: z.string().optional(),
-  evidenceImages: z.array(z.string()).default([]),
+  evidenceImages: z.array(z.string().url()).optional().default([]),
   
-  // Remediation
+  // Remediation fields
   remediation: z.string().optional(),
   remediationCode: z.string().optional(),
-  references: z.array(z.string()).default([]),
+  references: z.array(z.string().url()).optional().default([]),
   
   // Relations
   pentestId: z.string().cuid(),
@@ -111,131 +115,149 @@ export const createFindingSchema = z.object({
   companyId: z.string().cuid(),
   reporterId: z.string().cuid(),
   assignedToId: z.string().cuid().optional(),
-  
-  // Dates
-  firstFound: z.string().datetime().or(z.date()).optional(),
-  dueDate: z.string().datetime().or(z.date()).optional(),
 });
 
-export const updateFindingSchema = createFindingSchema.partial().omit({ 
-  companyId: true, 
-  reporterId: true 
+export const updateFindingSchema = createFindingSchema.partial().extend({
+  id: z.string().cuid(),
 });
 
-export const submitFixSchema = z.object({
-  fixDescription: z.string().min(10, 'Fix description is required'),
-  fixProofUrls: z.array(z.string()).default([]),
-});
-
-export const validateFixSchema = z.object({
-  validationNotes: z.string().min(10, 'Validation notes are required'),
-  approved: z.boolean(),
-});
-
-// ============================================
-// COMMENT SCHEMAS
-// ============================================
-
+// Comment schemas
 export const createCommentSchema = z.object({
-  text: z.string().min(1, 'Comment text is required'),
-  authorId: z.string().cuid(),
+  text: z.string().min(1, 'Comment cannot be empty').max(5000, 'Comment too long'),
   pentestId: z.string().cuid().optional(),
   findingId: z.string().cuid().optional(),
-  targetId: z.string().cuid().optional(),
-  attachments: z.array(z.string()).default([]),
-}).refine(
-  (data) => data.pentestId || data.findingId || data.targetId,
-  { message: 'Comment must be associated with a pentest, finding, or target' }
-);
+  authorId: z.string().cuid(),
+}).refine(data => data.pentestId || data.findingId, {
+  message: 'Comment must be associated with either a pentest or finding',
+});
 
 export const updateCommentSchema = z.object({
-  text: z.string().min(1).optional(),
+  id: z.string().cuid(),
+  text: z.string().min(1).max(5000),
 });
 
-// ============================================
-// REPORT SCHEMAS
-// ============================================
-
+// Report schemas
 export const createReportSchema = z.object({
-  title: z.string().min(2, 'Title is required'),
-  reportType: z.enum(['EXECUTIVE', 'TECHNICAL', 'COMPLIANCE', 'CUSTOM']).default('TECHNICAL'),
-  status: z.enum(['DRAFT', 'REVIEW', 'FINAL']).default('DRAFT'),
+  title: z.string().min(3, 'Title must be at least 3 characters'),
+  reportType: z.enum(['EXECUTIVE', 'TECHNICAL', 'FULL']),
+  status: z.enum(['DRAFT', 'FINAL', 'APPROVED']).default('DRAFT'),
+  format: z.enum(['PDF', 'DOCX', 'HTML']),
+  fileUrl: z.string().url().optional().or(z.literal('')),
   pentestId: z.string().cuid(),
   companyId: z.string().cuid(),
-  sections: z.any().optional(),
-  branding: z.any().optional(),
-  executiveSummary: z.string().optional(),
-  methodology: z.string().optional(),
+  generatedBy: z.string().cuid(), // Note: NOT generatorId
 });
 
-export const updateReportSchema = createReportSchema.partial().omit({ 
-  pentestId: true, 
-  companyId: true 
+export const updateReportSchema = createReportSchema.partial().extend({
+  id: z.string().cuid(),
 });
 
-// ============================================
-// TEMPLATE SCHEMAS
-// ============================================
-
+// Template schemas
 export const createTemplateSchema = z.object({
-  name: z.string().min(2, 'Template name is required'),
-  description: z.string().min(10, 'Description is required'),
-  category: z.string(),
-  severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']),
-  cvssScoreMin: z.number().min(0).max(10),
-  cvssScoreMax: z.number().min(0).max(10),
-  remediation: z.string(),
-  remediationCode: z.string().optional(),
-  references: z.array(z.string()).default([]),
-  cweId: z.string().optional(),
-  owaspCategory: z.string().optional(),
-  isPublic: z.boolean().default(true),
-  companyId: z.string().cuid().optional(),
+  name: z.string().min(2, 'Template name must be at least 2 characters'),
+  description: z.string().optional(),
+  type: z.enum(['FINDING', 'REPORT']),
+  category: z.string().optional(),
+  content: z.string().min(10, 'Template content must be at least 10 characters'),
+  isPublic: z.boolean().default(false),
+  companyId: z.string().cuid(),
 });
 
-// ============================================
-// NOTIFICATION SCHEMAS
-// ============================================
+export const updateTemplateSchema = createTemplateSchema.partial().extend({
+  id: z.string().cuid(),
+});
 
+// Notification schemas
 export const createNotificationSchema = z.object({
-  type: z.enum(['NEW_VULN', 'COMMENT', 'STATUS_CHANGE', 'DEADLINE', 'REPORT', 'ASSIGNMENT']),
   title: z.string().min(1),
-  message: z.string(),
+  message: z.string().min(1),
+  type: z.enum(['INFO', 'WARNING', 'SUCCESS', 'ERROR']).default('INFO'),
   link: z.string().optional(),
   userId: z.string().cuid(),
-  metadata: z.any().optional(),
 });
 
-export const updateNotificationPreferencesSchema = z.object({
-  emailEnabled: z.boolean().optional(),
-  pushEnabled: z.boolean().optional(),
-  dailyDigest: z.boolean().optional(),
-  notifyOnComment: z.boolean().optional(),
-  notifyOnAssign: z.boolean().optional(),
-  notifyOnStatus: z.boolean().optional(),
-  notifyOnDeadline: z.boolean().optional(),
+export const markNotificationReadSchema = z.object({
+  id: z.string().cuid(),
+  isRead: z.boolean().default(true),
 });
 
-// ============================================
-// TYPE EXPORTS
-// ============================================
+// Search and filter schemas
+export const searchSchema = z.object({
+  query: z.string().optional(),
+  page: z.number().min(1).default(1),
+  limit: z.number().min(1).max(100).default(20),
+  sortBy: z.string().optional(),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+});
 
+export const filterPentestsSchema = searchSchema.extend({
+  status: z.enum(['SCHEDULED', 'IN_PROGRESS', 'REPORTED', 'RESCAN', 'COMPLETED', 'CANCELLED']).optional(),
+  targetId: z.string().cuid().optional(),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+});
+
+export const filterFindingsSchema = searchSchema.extend({
+  severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']).optional(),
+  status: z.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']).optional(),
+  pentestId: z.string().cuid().optional(),
+  targetId: z.string().cuid().optional(),
+  assignedToId: z.string().cuid().optional(),
+  category: z.string().optional(),
+});
+
+export const filterTargetsSchema = searchSchema.extend({
+  type: z.enum(['WEB_APP', 'API', 'MOBILE_APP', 'CLOUD', 'HOST', 'NETWORK']).optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),
+  minRiskScore: z.number().min(0).max(100).optional(),
+  maxRiskScore: z.number().min(0).max(100).optional(),
+});
+
+// File upload schema
+export const fileUploadSchema = z.object({
+  file: z.any(),
+  type: z.enum(['image', 'document', 'evidence', 'logo', 'avatar']).optional(),
+  maxSize: z.number().default(10485760), // 10MB default
+});
+
+// Dashboard stats schema
+export const dashboardStatsSchema = z.object({
+  companyId: z.string().cuid(),
+  dateFrom: z.string().datetime().optional(),
+  dateTo: z.string().datetime().optional(),
+});
+
+// Bulk operations schemas
+export const bulkDeleteSchema = z.object({
+  ids: z.array(z.string().cuid()).min(1, 'Select at least one item'),
+});
+
+export const bulkUpdateStatusSchema = z.object({
+  ids: z.array(z.string().cuid()).min(1),
+  status: z.string(),
+});
+
+// Export schemas
+export const exportDataSchema = z.object({
+  type: z.enum(['findings', 'pentests', 'targets', 'reports']),
+  format: z.enum(['csv', 'json', 'xlsx']).default('csv'),
+  filters: z.any().optional(),
+});
+
+// Type exports from schemas
+export type LoginInput = z.infer<typeof loginSchema>;
 export type SignupInput = z.infer<typeof signupSchema>;
-export type SigninInput = z.infer<typeof signinSchema>;
-export type CreateCompanyInput = z.infer<typeof createCompanySchema>;
-export type UpdateCompanyInput = z.infer<typeof updateCompanySchema>;
-export type CreateTargetInput = z.infer<typeof createTargetSchema>;
-export type UpdateTargetInput = z.infer<typeof updateTargetSchema>;
 export type CreatePentestInput = z.infer<typeof createPentestSchema>;
 export type UpdatePentestInput = z.infer<typeof updatePentestSchema>;
+export type CreateTargetInput = z.infer<typeof createTargetSchema>;
+export type UpdateTargetInput = z.infer<typeof updateTargetSchema>;
 export type CreateFindingInput = z.infer<typeof createFindingSchema>;
 export type UpdateFindingInput = z.infer<typeof updateFindingSchema>;
-export type SubmitFixInput = z.infer<typeof submitFixSchema>;
-export type ValidateFixInput = z.infer<typeof validateFixSchema>;
 export type CreateCommentInput = z.infer<typeof createCommentSchema>;
-export type UpdateCommentInput = z.infer<typeof updateCommentSchema>;
 export type CreateReportInput = z.infer<typeof createReportSchema>;
-export type UpdateReportInput = z.infer<typeof updateReportSchema>;
 export type CreateTemplateInput = z.infer<typeof createTemplateSchema>;
 export type CreateNotificationInput = z.infer<typeof createNotificationSchema>;
-export type UpdateNotificationPreferencesInput = z.infer<typeof updateNotificationPreferencesSchema>;
+export type SearchInput = z.infer<typeof searchSchema>;
+export type FilterPentestsInput = z.infer<typeof filterPentestsSchema>;
+export type FilterFindingsInput = z.infer<typeof filterFindingsSchema>;
+export type FilterTargetsInput = z.infer<typeof filterTargetsSchema>;

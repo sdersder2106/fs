@@ -1,167 +1,206 @@
 'use client';
 
 import React from 'react';
-import { 
-  AlertCircle, 
-  MessageSquare, 
-  FileText, 
-  CheckCircle, 
-  AlertTriangle,
-  Clock
+import Link from 'next/link';
+import { cn } from '@/lib/utils';
+import { formatRelativeTime } from '@/lib/utils';
+import {
+  Shield,
+  Bug,
+  Target,
+  FileText,
+  MessageSquare,
+  AlertCircle,
+  CheckCircle,
+  XCircle,
+  Clock,
+  User,
 } from 'lucide-react';
-import { cn, getRelativeTime } from '@/lib/utils';
 
-interface Activity {
+interface ActivityItem {
   id: string;
-  type: 'vulnerability' | 'comment' | 'report' | 'status_change';
+  type: 'pentest' | 'finding' | 'target' | 'report' | 'comment';
+  action: 'created' | 'updated' | 'deleted' | 'completed' | 'started' | 'resolved';
   title: string;
-  description: string;
-  time: string | Date;
-  severity?: 'critical' | 'high' | 'medium' | 'low';
-  user?: {
+  description?: string;
+  user: {
     name: string;
     avatar?: string;
+  };
+  timestamp: Date | string;
+  link?: string;
+  metadata?: {
+    severity?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
+    status?: string;
   };
 }
 
 interface RecentActivityProps {
-  activities?: Activity[];
+  items: ActivityItem[];
+  maxItems?: number;
+  showViewAll?: boolean;
+  viewAllLink?: string;
+  className?: string;
 }
 
-export function RecentActivity({ activities }: RecentActivityProps) {
-  // Default demo data
-  const defaultActivities: Activity[] = [
-    {
-      id: '1',
-      type: 'vulnerability',
-      title: 'New Critical Vulnerability',
-      description: 'SQL Injection found in search parameter',
-      time: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-      severity: 'critical',
-      user: { name: 'John Pentester' }
-    },
-    {
-      id: '2',
-      type: 'comment',
-      title: 'Comment on XSS vulnerability',
-      description: 'Starting remediation work on this issue',
-      time: new Date(Date.now() - 5 * 60 * 60 * 1000), // 5 hours ago
-      user: { name: 'Jane Client' }
-    },
-    {
-      id: '3',
-      type: 'status_change',
-      title: 'Vulnerability status changed',
-      description: 'IDOR vulnerability marked as resolved',
-      time: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000), // 1 day ago
-      user: { name: 'Bob Developer' }
-    },
-    {
-      id: '4',
-      type: 'report',
-      title: 'Report generated',
-      description: 'Q4 2024 Penetration Test Report completed',
-      time: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-      user: { name: 'John Pentester' }
-    },
-  ];
+export const RecentActivity: React.FC<RecentActivityProps> = ({
+  items,
+  maxItems = 10,
+  showViewAll = true,
+  viewAllLink = '/dashboard/activity',
+  className,
+}) => {
+  const displayItems = items.slice(0, maxItems);
 
-  const activityData = activities || defaultActivities;
-
-  const getIcon = (type: string, severity?: string) => {
-    switch (type) {
-      case 'vulnerability':
-        return { 
-          icon: AlertTriangle, 
-          color: severity === 'critical' ? 'text-red-600' : 'text-orange-600',
-          bg: severity === 'critical' ? 'bg-red-100' : 'bg-orange-100'
-        };
-      case 'comment':
-        return { icon: MessageSquare, color: 'text-blue-600', bg: 'bg-blue-100' };
-      case 'report':
-        return { icon: FileText, color: 'text-purple-600', bg: 'bg-purple-100' };
-      case 'status_change':
-        return { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-100' };
-      default:
-        return { icon: AlertCircle, color: 'text-gray-600', bg: 'bg-gray-100' };
-    }
+  const getIcon = (type: ActivityItem['type'], action: ActivityItem['action']) => {
+    const iconMap = {
+      pentest: <Shield className="w-4 h-4" />,
+      finding: <Bug className="w-4 h-4" />,
+      target: <Target className="w-4 h-4" />,
+      report: <FileText className="w-4 h-4" />,
+      comment: <MessageSquare className="w-4 h-4" />,
+    };
+    return iconMap[type];
   };
 
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-      <div className="flex items-center gap-2 mb-6">
-        <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center">
-          <Clock className="w-5 h-5 text-indigo-600" />
-        </div>
-        <h3 className="text-lg font-semibold text-gray-900">
-          Recent Activity
-        </h3>
+  const getActionIcon = (action: ActivityItem['action']) => {
+    const actionMap = {
+      created: <AlertCircle className="w-3 h-3" />,
+      updated: <Clock className="w-3 h-3" />,
+      deleted: <XCircle className="w-3 h-3" />,
+      completed: <CheckCircle className="w-3 h-3" />,
+      started: <AlertCircle className="w-3 h-3" />,
+      resolved: <CheckCircle className="w-3 h-3" />,
+    };
+    return actionMap[action];
+  };
+
+  const getActionColor = (action: ActivityItem['action']) => {
+    const colorMap = {
+      created: 'bg-blue-100 text-blue-600',
+      updated: 'bg-yellow-100 text-yellow-600',
+      deleted: 'bg-red-100 text-red-600',
+      completed: 'bg-green-100 text-green-600',
+      started: 'bg-blue-100 text-blue-600',
+      resolved: 'bg-green-100 text-green-600',
+    };
+    return colorMap[action];
+  };
+
+  const getSeverityColor = (severity?: string) => {
+    const colorMap = {
+      CRITICAL: 'text-red-600',
+      HIGH: 'text-orange-600',
+      MEDIUM: 'text-yellow-600',
+      LOW: 'text-blue-600',
+      INFO: 'text-gray-600',
+    };
+    return severity ? colorMap[severity as keyof typeof colorMap] : '';
+  };
+
+  if (displayItems.length === 0) {
+    return (
+      <div className={cn('p-8 text-center', className)}>
+        <Clock className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+        <p className="text-gray-500">No recent activity</p>
       </div>
+    );
+  }
 
-      <div className="space-y-4">
-        {activityData.map((activity) => {
-          const iconConfig = getIcon(activity.type, activity.severity);
-          const Icon = iconConfig.icon;
-
-          return (
-            <div 
-              key={activity.id}
-              className="flex gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
-            >
-              {/* Icon */}
-              <div className={cn(
-                "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
-                iconConfig.bg
-              )}>
-                <Icon className={cn("w-5 h-5", iconConfig.color)} />
+  return (
+    <div className={cn('space-y-4', className)}>
+      {displayItems.map((item) => (
+        <div
+          key={item.id}
+          className="flex items-start space-x-3 p-3 rounded-lg hover:bg-gray-50 transition-colors"
+        >
+          {/* User Avatar */}
+          <div className="flex-shrink-0">
+            {item.user.avatar ? (
+              <img
+                src={item.user.avatar}
+                alt={item.user.name}
+                className="w-8 h-8 rounded-full"
+              />
+            ) : (
+              <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
+                <User className="w-4 h-4 text-gray-500" />
               </div>
+            )}
+          </div>
 
-              {/* Content */}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">
-                  {activity.title}
-                </p>
-                <p className="text-sm text-gray-600 truncate">
-                  {activity.description}
-                </p>
-                <div className="flex items-center gap-2 mt-1">
-                  {activity.user && (
-                    <>
-                      <span className="text-xs text-gray-500">
-                        {activity.user.name}
-                      </span>
-                      <span className="text-xs text-gray-400">•</span>
-                    </>
-                  )}
-                  <span className="text-xs text-gray-500">
-                    {getRelativeTime(activity.time)}
+          {/* Activity Content */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <div className="flex items-center space-x-2">
+                  <div className={cn('p-1 rounded', getActionColor(item.action))}>
+                    {getIcon(item.type, item.action)}
+                  </div>
+                  <span className="text-sm font-medium text-gray-900">
+                    {item.user.name}
+                  </span>
+                  <span className="text-sm text-gray-500">
+                    {item.action}
+                  </span>
+                  <span className="text-sm text-gray-500">
+                    {item.type}
                   </span>
                 </div>
+                
+                <div className="mt-1">
+                  {item.link ? (
+                    <Link
+                      href={item.link}
+                      className="text-sm font-medium text-gray-900 hover:text-primary-600"
+                    >
+                      {item.title}
+                    </Link>
+                  ) : (
+                    <span className="text-sm font-medium text-gray-900">
+                      {item.title}
+                    </span>
+                  )}
+                  
+                  {item.metadata?.severity && (
+                    <span
+                      className={cn(
+                        'ml-2 text-xs font-medium',
+                        getSeverityColor(item.metadata.severity)
+                      )}
+                    >
+                      {item.metadata.severity}
+                    </span>
+                  )}
+                </div>
+                
+                {item.description && (
+                  <p className="text-sm text-gray-500 mt-1 line-clamp-2">
+                    {item.description}
+                  </p>
+                )}
               </div>
-
-              {/* Severity badge (if applicable) */}
-              {activity.severity && (
-                <span className={cn(
-                  "px-2 py-1 text-xs font-medium rounded-full flex-shrink-0 self-start",
-                  activity.severity === 'critical' && "bg-red-100 text-red-700",
-                  activity.severity === 'high' && "bg-orange-100 text-orange-700",
-                  activity.severity === 'medium' && "bg-yellow-100 text-yellow-700",
-                  activity.severity === 'low' && "bg-blue-100 text-blue-700"
-                )}>
-                  {activity.severity.toUpperCase()}
+              
+              <div className="ml-4 flex-shrink-0">
+                <span className="text-xs text-gray-400">
+                  {formatRelativeTime(item.timestamp)}
                 </span>
-              )}
+              </div>
             </div>
-          );
-        })}
-      </div>
+          </div>
+        </div>
+      ))}
 
-      {/* View all link */}
-      <div className="mt-4 pt-4 border-t border-gray-200">
-        <button className="w-full text-sm font-medium text-blue-600 hover:text-blue-700 py-2 rounded-lg hover:bg-blue-50 transition-colors">
-          View all activity →
-        </button>
-      </div>
+      {showViewAll && items.length > maxItems && (
+        <div className="pt-4 border-t border-gray-200">
+          <Link
+            href={viewAllLink}
+            className="text-sm font-medium text-primary-600 hover:text-primary-700"
+          >
+            View all activity ({items.length} total) →
+          </Link>
+        </div>
+      )}
     </div>
   );
-}
+};

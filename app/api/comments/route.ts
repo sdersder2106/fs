@@ -1,43 +1,209 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getAuthUser } from '@/lib/auth-helpers';
+import { requireAuth } from '@/lib/auth-helpers';
+import { 
+  successResponse, 
+  errorResponse, 
+  unauthorizedResponse,
+  createdResponse,
+  getPaginationParams,
+  getQueryParams,
+  paginatedResponse
+} from '@/lib/api-response';
 import { createCommentSchema } from '@/lib/validations';
-import { handleApiError, successResponse, paginatedResponse } from '@/lib/api-response';
+import { notificationTemplates, createNotification } from '@/lib/notifications';
 
-// GET /api/comments - List all comments
+// GET /api/comments - List comments for pentest or finding
 export async function GET(request: NextRequest) {
   try {
-    const user = await getAuthUser();
-    const { searchParams } = new URL(request.url);
+    const user = await requireAuth();
+    const params = getQueryParams(request);
+    const { page, limit, skip } = getPaginationParams(params);
+    
+    const pentestId = params.get('pentestId');
+    const findingId = params.get('findingId');
 
-    // Pagination
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const skip = (page - 1) * limit;
-
-    // Filters
-    const pentestId = searchParams.get('pentestId');
-    const findingId = searchParams.get('findingId');
-    const targetId = searchParams.get('targetId');
-    const authorId = searchParams.get('authorId');
+    if (!pentestId && !findingId) {
+      return errorResponse('Either pentestId or findingId is required', 400);
+    }
 
     // Build where clause
     const where: any = {};
 
-    if (pentestId) where.pentestId = pentestId;
-    if (findingId) where.findingId = findingId;
-    if (targetId) where.targetId = targetId;
-    if (authorId) where.authorId = authorId;
+    if (pentestId) {
+      // Verify pentest belongs to user's company
+      const pentest = await prisma.pentest.findFirst({
+        where: {
+          id: pentestId,
+          companyId: user.companyId,
+        },
+      });
 
-    // Get total count
-    const total = await prisma.comment.count({ where });
+      if (!pentest) {
+        return errorResponse('Pentest not found or access denied', 404);
+      }
 
-    // Get comments
-    const comments = await prisma.comment.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: { createdAt: 'desc' },
+      where.pentestId = pentestId;
+    }
+
+    if (findingId) {
+      // Verify finding belongs to user's company
+      const finding = await prisma.finding.findFirst({
+        where: {
+          id: findingId,
+          companyId: user.companyId,
+        },
+      });
+
+      if (!finding) {
+        return errorResponse('Finding not found or access denied', 404);
+      }
+
+      where.findingId = findingId;
+    }
+
+    // Get comments with author details
+    const [comments, total] = await Promise.all([
+      prisma.comment.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          author: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              avatar: true,
+              role: true,
+            },
+          },
+          pentest: pentestId ? undefined : {
+            select: {
+              id: true,
+              title: true,
+            },
+          },
+          finding: findingId ? undefined : {
+            select: {
+              id: true,
+              title: true,
+              severity: true,
+            },
+          },
+        },
+      }),
+      prisma.comment.count({ where }),
+    ]);
+
+    // Format response
+    const formattedComments = comments.map(comment => ({
+      id: comment.id,
+      text: comment.text,
+      author: comment.author,
+      pentest: comment.pentest,
+      finding: comment.finding,
+      createdAt: comment.createdAt,
+      updatedAt: comment.updatedAt,
+      isEdited: comment.createdAt.getTime() !== comment.updatedAt.getTime(),
+    }));
+
+    return paginatedResponse(formattedComments, page, limit, total);
+  } catch (error) {
+    console.error('Error fetching comments:', error);
+    
+    if (error instanceof Error) {
+      if (error.message === 'Unauthorized') {
+        return unauthorizedResponse();
+      }
+    }
+    
+    return errorResponse('Failed to fetch comments', 500);
+  }
+}
+
+// POST /api/comments - Create new comment
+export async function POST(request: NextRequest) {
+  try {
+    const user = await requireAuth();
+    const body = await request.json();
+    
+    // Validate input
+    const validationResult = createCommentSchema.safeParse({
+      ...body,
+      authorId: user.id,
+    });
+    
+    if (!validationResult.success) {
+      return errorResponse(validationResult.error, 400);
+    }
+
+    const { text, pentestId, findingId } = validationResult.data;
+
+    // Verify target entity exists and user has access
+    let entityTitle = '';
+    let entityType = '';
+    let notifyUserIds: string[] = [];
+
+    if (pentestId) {
+      const pentest = await prisma.pentest.findFirst({
+        where: {
+          id: pentestId,
+          companyId: user.companyId,
+        },
+        include: {
+          createdBy: {
+            select: { id: true },
+          },
+        },
+      });
+
+      if (!pentest) {
+        return errorResponse('Pentest not found or access denied', 404);
+      }
+
+      entityTitle = pentest.title;
+      entityType = 'pentest';
+      notifyUserIds.push(pentest.createdBy.id);
+    }
+
+    if (findingId) {
+      const finding = await prisma.finding.findFirst({
+        where: {
+          id: findingId,
+          companyId: user.companyId,
+        },
+        include: {
+          reporter: {
+            select: { id: true },
+          },
+          assignedTo: {
+            select: { id: true },
+          },
+        },
+      });
+
+      if (!finding) {
+        return errorResponse('Finding not found or access denied', 404);
+      }
+
+      entityTitle = finding.title;
+      entityType = 'finding';
+      notifyUserIds.push(finding.reporter.id);
+      if (finding.assignedTo) {
+        notifyUserIds.push(finding.assignedTo.id);
+      }
+    }
+
+    // Create comment
+    const comment = await prisma.comment.create({
+      data: {
+        text,
+        pentestId,
+        findingId,
+        authorId: user.id,
+      },
       include: {
         author: {
           select: {
@@ -45,74 +211,89 @@ export async function GET(request: NextRequest) {
             fullName: true,
             email: true,
             avatar: true,
-          },
-        },
-        pentest: {
-          select: {
-            id: true,
-            title: true,
-          },
-        },
-        finding: {
-          select: {
-            id: true,
-            title: true,
-            severity: true,
-          },
-        },
-        target: {
-          select: {
-            id: true,
-            name: true,
+            role: true,
           },
         },
       },
     });
 
-    return paginatedResponse(comments, page, limit, total);
-  } catch (error) {
-    return handleApiError(error);
-  }
-}
+    // Send notifications to relevant users (except the comment author)
+    const uniqueUserIds = [...new Set(notifyUserIds)].filter(id => id !== user.id);
+    
+    if (uniqueUserIds.length > 0) {
+      const notification = notificationTemplates.commentAdded(
+        entityType,
+        entityTitle,
+        pentestId || findingId || ''
+      );
 
-// POST /api/comments - Create new comment
-export async function POST(request: NextRequest) {
-  try {
-    const user = await getAuthUser();
-    const body = await request.json();
+      await Promise.all(
+        uniqueUserIds.map(userId =>
+          createNotification({
+            userId,
+            ...notification,
+          })
+        )
+      );
+    }
 
-    // Auto-set authorId to current user
-    body.authorId = user.id;
-
-    const validatedData = createCommentSchema.parse(body);
-
-    const comment = await prisma.comment.create({
-      data: validatedData,
-      include: {
-        author: {
-          select: {
-            id: true,
-            fullName: true,
-            avatar: true,
-          },
-        },
-        pentest: {
-          select: {
-            id: true,
-            title: true,
-          },
-        },
-        finding: {
-          select: {
-            id: true,
-            title: true,
-          },
+    // Also notify other commenters on the same entity
+    const previousCommenters = await prisma.comment.findMany({
+      where: {
+        OR: [
+          ...(pentestId ? [{ pentestId }] : []),
+          ...(findingId ? [{ findingId }] : []),
+        ],
+        NOT: {
+          authorId: user.id,
         },
       },
+      select: {
+        authorId: true,
+      },
+      distinct: ['authorId'],
     });
 
-    return successResponse(comment, 201);
+    const commenterIds = previousCommenters
+      .map(c => c.authorId)
+      .filter(id => !uniqueUserIds.includes(id));
+
+    if (commenterIds.length > 0) {
+      const notification = notificationTemplates.commentAdded(
+        entityType,
+        entityTitle,
+        pentestId || findingId || ''
+      );
+
+      await Promise.all(
+        commenterIds.map(userId =>
+          createNotification({
+            userId,
+            ...notification,
+          })
+        )
+      );
+    }
+
+    const responseData = {
+      id: comment.id,
+      text: comment.text,
+      author: comment.author,
+      pentestId: comment.pentestId,
+      findingId: comment.findingId,
+      createdAt: comment.createdAt,
+    };
+
+    return createdResponse(responseData, 'Comment added successfully');
   } catch (error) {
-    return handleApiError(error);
+    console.error('Error creating comment:', error);
+    
+    if (error instanceof Error) {
+      if (error.message === 'Unauthorized') {
+        return unauthorizedResponse();
+      }
+    }
+    
+    return errorResponse('Failed to create comment', 500);
   }
 }

@@ -1,54 +1,56 @@
 {
-  "framework": "nextjs",
-  "buildCommand": "bash prebuild.sh && npm run vercel-build",
+  "buildCommand": "prisma generate && next build",
   "outputDirectory": ".next",
-  "installCommand": "npm install --legacy-peer-deps",
+  "framework": "nextjs",
+  "installCommand": "npm install",
+  "regions": ["iad1"],
   "functions": {
-    "app/api/**/*.ts": {
-      "maxDuration": 30,
-      "memory": 1024
+    "app/api/auth/[...nextauth]/route.ts": {
+      "maxDuration": 10
+    },
+    "app/api/reports/generate/route.ts": {
+      "maxDuration": 30
     }
   },
   "headers": [
     {
       "source": "/api/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate" },
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "X-XSS-Protection", "value": "1; mode=block" }
-      ]
-    },
-    {
-      "source": "/_next/static/(.*)",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        {
+          "key": "Cache-Control",
+          "value": "s-maxage=10, stale-while-revalidate"
+        }
       ]
     },
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-DNS-Prefetch-Control", "value": "on" },
-        { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        }
       ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/login",
+      "permanent": false
     }
   ],
   "rewrites": [
     {
-      "source": "/api/transport/polling",
-      "destination": "/api/status"
-    },
-    {
-      "source": "/api/socket.io/:path*",
-      "destination": "/api/status"
+      "source": "/uploads/:path*",
+      "destination": "/api/files/:path*"
     }
-  ],
-  "env": {
-    "NODE_ENV": "production",
-    "NEXT_TELEMETRY_DISABLED": "1"
-  },
-  "github": {
-    "silent": false,
-    "autoJobCancelation": true
-  }
+  ]
 }

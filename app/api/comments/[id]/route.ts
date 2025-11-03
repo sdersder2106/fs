@@ -1,25 +1,29 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getAuthUser } from '@/lib/auth-helpers';
-import { updateCommentSchema } from '@/lib/validations';
+import { requireAuth } from '@/lib/auth-helpers';
 import { 
-  handleApiError, 
   successResponse, 
+  errorResponse, 
+  unauthorizedResponse,
+  forbiddenResponse,
   notFoundResponse,
-  successWithMessage,
-  forbiddenResponse 
+  updatedResponse,
+  deletedResponse
 } from '@/lib/api-response';
+import { updateCommentSchema } from '@/lib/validations';
 
-// GET /api/comments/[id] - Get comment by ID
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+interface RouteParams {
+  params: { id: string };
+}
+
+// GET /api/comments/[id] - Get single comment
+export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await getAuthUser();
+    const user = await requireAuth();
+    const { id } = params;
 
     const comment = await prisma.comment.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         author: {
           select: {
@@ -27,12 +31,14 @@ export async function GET(
             fullName: true,
             email: true,
             avatar: true,
+            role: true,
           },
         },
         pentest: {
           select: {
             id: true,
             title: true,
+            companyId: true,
           },
         },
         finding: {
@@ -40,12 +46,7 @@ export async function GET(
             id: true,
             title: true,
             severity: true,
-          },
-        },
-        target: {
-          select: {
-            id: true,
-            name: true,
+            companyId: true,
           },
         },
       },
@@ -55,85 +56,194 @@ export async function GET(
       return notFoundResponse('Comment');
     }
 
-    return successResponse(comment);
+    // Verify user has access (through pentest or finding company)
+    const companyId = comment.pentest?.companyId || comment.finding?.companyId;
+    if (companyId !== user.companyId) {
+      return forbiddenResponse('Access denied');
+    }
+
+    const responseData = {
+      id: comment.id,
+      text: comment.text,
+      author: comment.author,
+      pentest: comment.pentest ? {
+        id: comment.pentest.id,
+        title: comment.pentest.title,
+      } : undefined,
+      finding: comment.finding ? {
+        id: comment.finding.id,
+        title: comment.finding.title,
+        severity: comment.finding.severity,
+      } : undefined,
+      createdAt: comment.createdAt,
+      updatedAt: comment.updatedAt,
+      isEdited: comment.createdAt.getTime() !== comment.updatedAt.getTime(),
+    };
+
+    return successResponse(responseData);
   } catch (error) {
-    return handleApiError(error);
+    console.error('Error fetching comment:', error);
+    
+    if (error instanceof Error) {
+      if (error.message === 'Unauthorized') {
+        return unauthorizedResponse();
+      }
+      if (error.message === 'Forbidden') {
+        return forbiddenResponse();
+      }
+    }
+    
+    return errorResponse('Failed to fetch comment', 500);
   }
 }
 
-// PATCH /api/comments/[id] - Update comment
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+// PUT /api/comments/[id] - Update comment
+export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
-    const user = await getAuthUser();
+    const user = await requireAuth();
+    const { id } = params;
     const body = await request.json();
+    
+    // Validate input
+    const validationResult = updateCommentSchema.safeParse({ ...body, id });
+    
+    if (!validationResult.success) {
+      return errorResponse(validationResult.error, 400);
+    }
 
-    // Get comment first to check ownership
+    // Check if comment exists and get author
     const existingComment = await prisma.comment.findUnique({
-      where: { id: params.id },
+      where: { id },
+      include: {
+        pentest: {
+          select: { companyId: true },
+        },
+        finding: {
+          select: { companyId: true },
+        },
+      },
     });
 
     if (!existingComment) {
       return notFoundResponse('Comment');
     }
 
-    // Only author can update their comment
-    if (existingComment.authorId !== user.id && user.role !== 'ADMIN') {
+    // Verify user has access to the company
+    const companyId = existingComment.pentest?.companyId || existingComment.finding?.companyId;
+    if (companyId !== user.companyId) {
+      return forbiddenResponse('Access denied');
+    }
+
+    // Only author can edit their own comment
+    if (existingComment.authorId !== user.id) {
       return forbiddenResponse('You can only edit your own comments');
     }
 
-    const validatedData = updateCommentSchema.parse(body);
+    // Check if comment is too old to edit (e.g., 1 hour)
+    const editTimeLimit = 60 * 60 * 1000; // 1 hour in milliseconds
+    const timeSinceCreation = Date.now() - existingComment.createdAt.getTime();
+    
+    if (timeSinceCreation > editTimeLimit && user.role !== 'ADMIN') {
+      return errorResponse('Comments can only be edited within 1 hour of creation', 400);
+    }
 
-    const comment = await prisma.comment.update({
-      where: { id: params.id },
-      data: validatedData,
+    const { text } = validationResult.data;
+
+    // Update comment
+    const updatedComment = await prisma.comment.update({
+      where: { id },
+      data: { text },
       include: {
         author: {
           select: {
             id: true,
             fullName: true,
+            email: true,
             avatar: true,
+            role: true,
           },
         },
       },
     });
 
-    return successWithMessage(comment, 'Comment updated successfully');
+    const responseData = {
+      id: updatedComment.id,
+      text: updatedComment.text,
+      author: updatedComment.author,
+      createdAt: updatedComment.createdAt,
+      updatedAt: updatedComment.updatedAt,
+      isEdited: true,
+    };
+
+    return updatedResponse(responseData, 'Comment updated successfully');
   } catch (error) {
-    return handleApiError(error);
+    console.error('Error updating comment:', error);
+    
+    if (error instanceof Error) {
+      if (error.message === 'Unauthorized') {
+        return unauthorizedResponse();
+      }
+      if (error.message === 'Forbidden') {
+        return forbiddenResponse();
+      }
+    }
+    
+    return errorResponse('Failed to update comment', 500);
   }
 }
 
 // DELETE /api/comments/[id] - Delete comment
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
-    const user = await getAuthUser();
+    const user = await requireAuth();
+    const { id } = params;
 
-    // Get comment first to check ownership
+    // Check if comment exists
     const comment = await prisma.comment.findUnique({
-      where: { id: params.id },
+      where: { id },
+      include: {
+        pentest: {
+          select: { companyId: true },
+        },
+        finding: {
+          select: { companyId: true },
+        },
+      },
     });
 
     if (!comment) {
       return notFoundResponse('Comment');
     }
 
-    // Only author or ADMIN can delete comment
+    // Verify user has access to the company
+    const companyId = comment.pentest?.companyId || comment.finding?.companyId;
+    if (companyId !== user.companyId) {
+      return forbiddenResponse('Access denied');
+    }
+
+    // Only author and admins can delete comments
     if (comment.authorId !== user.id && user.role !== 'ADMIN') {
       return forbiddenResponse('You can only delete your own comments');
     }
 
+    // Delete comment
     await prisma.comment.delete({
-      where: { id: params.id },
+      where: { id },
     });
 
-    return successWithMessage(null, 'Comment deleted successfully');
+    return deletedResponse('Comment deleted successfully');
   } catch (error) {
-    return handleApiError(error);
+    console.error('Error deleting comment:', error);
+    
+    if (error instanceof Error) {
+      if (error.message === 'Unauthorized') {
+        return unauthorizedResponse();
+      }
+      if (error.message === 'Forbidden') {
+        return forbiddenResponse();
+      }
+    }
+    
+    return errorResponse('Failed to delete comment', 500);
   }
 }

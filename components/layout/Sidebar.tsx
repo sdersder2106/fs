@@ -3,145 +3,321 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { 
-  LayoutDashboard, 
-  Shield, 
-  Target, 
-  AlertCircle, 
-  FileText, 
-  CheckCircle, 
-  Settings,
-  Library,
-  Bell
-} from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  LayoutDashboard,
+  Target,
+  Shield,
+  Bug,
+  FileText,
+  Bell,
+  Settings,
+  Building,
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  User,
+  Menu,
+  X,
+  Folder,
+} from 'lucide-react';
 
-interface SidebarItemProps {
-  href: string;
-  icon: React.ElementType;
+interface NavItem {
   label: string;
-  isActive: boolean;
-}
-
-function SidebarItem({ href, icon: Icon, label, isActive }: SidebarItemProps) {
-  return (
-    <Link
-      href={href}
-      className={cn(
-        "flex items-center gap-3 px-4 py-3 rounded-lg transition-all",
-        "text-gray-300 hover:bg-sidebar-item hover:text-white",
-        isActive && "bg-blue-600 text-white font-medium"
-      )}
-    >
-      <Icon className="w-5 h-5" />
-      <span className="text-sm">{label}</span>
-    </Link>
-  );
+  href: string;
+  icon: React.ReactNode;
+  badge?: string | number;
+  requiredRole?: string[];
+  children?: NavItem[];
 }
 
 interface SidebarProps {
-  userRole?: 'ADMIN' | 'CLIENT';
+  user?: {
+    name: string;
+    email: string;
+    role: string;
+    avatar?: string;
+  };
+  companyName?: string;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+  className?: string;
 }
 
-export function Sidebar({ userRole }: SidebarProps) {
+export const Sidebar: React.FC<SidebarProps> = ({
+  user,
+  companyName = 'Base44',
+  collapsed = false,
+  onToggleCollapse,
+  className,
+}) => {
   const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = React.useState(false);
+  const [expandedItems, setExpandedItems] = React.useState<string[]>([]);
 
-  const navigation = [
-    { 
-      href: '/dashboard', 
-      icon: LayoutDashboard, 
+  const navItems: NavItem[] = [
+    {
       label: 'Dashboard',
-      roles: ['ADMIN', 'CLIENT']
+      href: '/dashboard',
+      icon: <LayoutDashboard className="w-5 h-5" />,
     },
-    { 
-      href: '/dashboard/pentests', 
-      icon: Shield, 
+    {
       label: 'Pentests',
-      roles: ['ADMIN', 'CLIENT']
+      href: '/dashboard/pentests',
+      icon: <Shield className="w-5 h-5" />,
+      badge: 3,
     },
-    { 
-      href: '/dashboard/targets', 
-      icon: Target, 
+    {
       label: 'Targets',
-      roles: ['ADMIN', 'CLIENT']
+      href: '/dashboard/targets',
+      icon: <Target className="w-5 h-5" />,
     },
-    { 
-      href: '/dashboard/vulnerabilities', 
-      icon: AlertCircle, 
-      label: 'Vulnerabilities',
-      roles: ['ADMIN', 'CLIENT']
+    {
+      label: 'Findings',
+      href: '/dashboard/findings',
+      icon: <Bug className="w-5 h-5" />,
+      badge: 12,
     },
-    { 
-      href: '/dashboard/reports', 
-      icon: FileText, 
+    {
       label: 'Reports',
-      roles: ['ADMIN', 'CLIENT']
+      href: '/dashboard/reports',
+      icon: <FileText className="w-5 h-5" />,
     },
-    { 
-      href: '/dashboard/compliance', 
-      icon: CheckCircle, 
-      label: 'Compliance',
-      roles: ['ADMIN', 'CLIENT']
-    },
-    { 
-      href: '/dashboard/templates', 
-      icon: Library, 
+    {
       label: 'Templates',
-      roles: ['ADMIN'] // ADMIN only
+      href: '/dashboard/templates',
+      icon: <Folder className="w-5 h-5" />,
+      requiredRole: ['ADMIN'],
     },
-    { 
-      href: '/dashboard/notifications', 
-      icon: Bell, 
+    {
       label: 'Notifications',
-      roles: ['ADMIN', 'CLIENT']
+      href: '/dashboard/notifications',
+      icon: <Bell className="w-5 h-5" />,
+      badge: 5,
     },
-    { 
-      href: '/dashboard/settings', 
-      icon: Settings, 
+    {
       label: 'Settings',
-      roles: ['ADMIN', 'CLIENT']
+      href: '/dashboard/settings',
+      icon: <Settings className="w-5 h-5" />,
+    },
+    {
+      label: 'Company',
+      href: '/dashboard/company-settings',
+      icon: <Building className="w-5 h-5" />,
+      requiredRole: ['ADMIN'],
     },
   ];
 
-  // Filter navigation based on user role
-  const filteredNavigation = navigation.filter(item => 
-    !userRole || item.roles.includes(userRole)
-  );
+  // Filter items based on user role
+  const filteredNavItems = navItems.filter(item => {
+    if (!item.requiredRole || !user) return true;
+    return item.requiredRole.includes(user.role);
+  });
 
-  return (
-    <aside className="fixed left-0 top-0 h-screen w-64 bg-sidebar-bg border-r border-gray-800 flex flex-col">
+  const toggleExpanded = (label: string) => {
+    setExpandedItems(prev =>
+      prev.includes(label)
+        ? prev.filter(item => item !== label)
+        : [...prev, label]
+    );
+  };
+
+  const isActive = (href: string) => {
+    if (href === '/dashboard') {
+      return pathname === href;
+    }
+    return pathname.startsWith(href);
+  };
+
+  const renderNavItem = (item: NavItem, depth = 0) => {
+    const active = isActive(item.href);
+    const hasChildren = item.children && item.children.length > 0;
+    const isExpanded = expandedItems.includes(item.label);
+
+    const content = (
+      <>
+        <span className="flex items-center flex-1">
+          {item.icon}
+          {!collapsed && (
+            <span className="ml-3">{item.label}</span>
+          )}
+        </span>
+        {!collapsed && item.badge && (
+          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-primary-100 text-primary-600">
+            {item.badge}
+          </span>
+        )}
+        {!collapsed && hasChildren && (
+          <ChevronRight
+            className={cn(
+              'w-4 h-4 transition-transform',
+              isExpanded && 'rotate-90'
+            )}
+          />
+        )}
+      </>
+    );
+
+    const itemClasses = cn(
+      'flex items-center px-3 py-2 rounded-lg transition-colors',
+      'hover:bg-gray-100',
+      active && 'bg-primary-50 text-primary-600 font-medium',
+      !active && 'text-gray-700',
+      depth > 0 && 'ml-6'
+    );
+
+    if (hasChildren && !collapsed) {
+      return (
+        <div key={item.label}>
+          <button
+            onClick={() => toggleExpanded(item.label)}
+            className={cn(itemClasses, 'w-full text-left')}
+          >
+            {content}
+          </button>
+          {isExpanded && (
+            <div className="mt-1 space-y-1">
+              {item.children!.map(child => renderNavItem(child, depth + 1))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <Link
+        key={item.label}
+        href={item.href}
+        className={itemClasses}
+        title={collapsed ? item.label : undefined}
+      >
+        {content}
+      </Link>
+    );
+  };
+
+  const sidebarContent = (
+    <>
       {/* Logo */}
-      <div className="px-6 py-6 border-b border-gray-800">
-        <Link href="/dashboard" className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
-            <Shield className="w-6 h-6 text-white" />
+      <div className="flex items-center justify-between px-3 py-4 border-b border-gray-200">
+        <Link 
+          href="/dashboard" 
+          className="flex items-center space-x-2"
+        >
+          <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
+            <span className="text-white font-bold text-lg">B</span>
           </div>
-          <span className="text-xl font-bold text-white">Base44</span>
+          {!collapsed && (
+            <span className="text-xl font-bold text-gray-900">{companyName}</span>
+          )}
         </Link>
+        {onToggleCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            className="p-1 rounded-lg hover:bg-gray-100 lg:block hidden"
+          >
+            {collapsed ? (
+              <ChevronRight className="w-5 h-5 text-gray-500" />
+            ) : (
+              <ChevronLeft className="w-5 h-5 text-gray-500" />
+            )}
+          </button>
+        )}
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto custom-scrollbar">
-        {filteredNavigation.map((item) => (
-          <SidebarItem
-            key={item.href}
-            href={item.href}
-            icon={item.icon}
-            label={item.label}
-            isActive={pathname === item.href}
-          />
-        ))}
+      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto sidebar-scroll">
+        {filteredNavItems.map(item => renderNavItem(item))}
       </nav>
 
-      {/* User info footer */}
-      <div className="px-4 py-4 border-t border-gray-800">
-        <div className="flex items-center gap-3 px-3 py-2 text-gray-400 text-xs">
-          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-          <span>
-            {userRole === 'ADMIN' ? 'Admin Mode' : 'Client Mode'}
-          </span>
+      {/* User section */}
+      {user && (
+        <div className="border-t border-gray-200 p-3">
+          <div className={cn(
+            'flex items-center',
+            collapsed ? 'justify-center' : 'space-x-3'
+          )}>
+            <div className="flex-shrink-0">
+              <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
+                {user.avatar ? (
+                  <img
+                    src={user.avatar}
+                    alt={user.name}
+                    className="w-full h-full rounded-full object-cover"
+                  />
+                ) : (
+                  <User className="w-6 h-6 text-gray-600" />
+                )}
+              </div>
+            </div>
+            {!collapsed && (
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">
+                  {user.name}
+                </p>
+                <p className="text-xs text-gray-500 truncate">
+                  {user.role}
+                </p>
+              </div>
+            )}
+            {!collapsed && (
+              <button
+                onClick={() => {
+                  // Handle logout
+                  window.location.href = '/login';
+                }}
+                className="p-1 rounded-lg hover:bg-gray-100"
+                title="Logout"
+              >
+                <LogOut className="w-5 h-5 text-gray-500" />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-    </aside>
+      )}
+    </>
   );
-}
+
+  return (
+    <>
+      {/* Mobile toggle */}
+      <button
+        onClick={() => setMobileOpen(!mobileOpen)}
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-white shadow-md"
+      >
+        {mobileOpen ? (
+          <X className="w-6 h-6 text-gray-700" />
+        ) : (
+          <Menu className="w-6 h-6 text-gray-700" />
+        )}
+      </button>
+
+      {/* Mobile sidebar */}
+      {mobileOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-40 bg-black bg-opacity-50"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+      
+      <aside
+        className={cn(
+          'fixed inset-y-0 left-0 z-40 flex flex-col bg-white border-r border-gray-200 transition-all duration-300',
+          collapsed ? 'w-16' : 'w-64',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+          className
+        )}
+      >
+        {sidebarContent}
+      </aside>
+
+      {/* Spacer for desktop */}
+      <div 
+        className={cn(
+          'hidden lg:block transition-all duration-300',
+          collapsed ? 'w-16' : 'w-64'
+        )}
+      />
+    </>
+  );
+};

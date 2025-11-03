@@ -1,119 +1,330 @@
-import { getServerSession } from 'next-auth/next';
+import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { redirect } from 'next/navigation';
-import { SessionUser } from '@/types';
+import { prisma } from '@/lib/prisma';
+import bcrypt from 'bcryptjs';
 
-/**
- * Get the current user session
- * Returns null if not authenticated
- */
-export async function getCurrentUser(): Promise<SessionUser | null> {
-  const session = await getServerSession(authOptions);
-  return session?.user || null;
+// Types
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  companyId: string;
+  companyName?: string;
+  image?: string | null;
 }
 
-/**
- * Require authentication
- * Redirects to login if not authenticated
- */
-export async function requireAuth(): Promise<SessionUser> {
+// Get current user from session
+export async function getCurrentUser(): Promise<AuthUser | null> {
+  try {
+    const session = await getServerSession(authOptions);
+    
+    if (!session?.user?.email) {
+      return null;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email: session.user.email },
+      include: { company: true },
+    });
+
+    if (!user) {
+      return null;
+    }
+
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.fullName,
+      role: user.role,
+      companyId: user.companyId,
+      companyName: user.company.name,
+      image: user.avatar,
+    };
+  } catch (error) {
+    console.error('Error getting current user:', error);
+    return null;
+  }
+}
+
+// Check if user has specific role
+export async function hasRole(role: string | string[]): Promise<boolean> {
   const user = await getCurrentUser();
   
   if (!user) {
-    redirect('/login');
+    return false;
   }
-  
-  return user;
+
+  const roles = Array.isArray(role) ? role : [role];
+  return roles.includes(user.role);
 }
 
-/**
- * Require ADMIN role
- * Redirects to dashboard if not admin
- */
-export async function requireAdmin(): Promise<SessionUser> {
-  const user = await requireAuth();
-  
-  if (user.role !== 'ADMIN') {
-    redirect('/dashboard');
-  }
-  
-  return user;
+// Check if user is admin
+export async function isAdmin(): Promise<boolean> {
+  return hasRole('ADMIN');
 }
 
-/**
- * Check if user has access to a company's resources
- */
-export async function requireCompanyAccess(companyId: string): Promise<SessionUser> {
-  const user = await requireAuth();
-  
-  // ADMIN can access all companies
-  if (user.role === 'ADMIN') {
-    return user;
-  }
-  
-  // CLIENT can only access their own company
-  if (user.companyId !== companyId) {
-    redirect('/dashboard');
-  }
-  
-  return user;
+// Check if user is pentester
+export async function isPentester(): Promise<boolean> {
+  return hasRole(['ADMIN', 'PENTESTER']);
 }
 
-/**
- * Check if user is authenticated (for API routes)
- * Returns user or throws error
- */
-export async function getAuthUser(): Promise<SessionUser> {
+// Check if user can access company
+export async function canAccessCompany(companyId: string): Promise<boolean> {
+  const user = await getCurrentUser();
+  
+  if (!user) {
+    return false;
+  }
+
+  // Admins can access their own company
+  // In a multi-tenant setup, you might allow super admins to access all
+  return user.companyId === companyId;
+}
+
+// Create new user (for signup)
+export async function createUser(data: {
+  email: string;
+  password: string;
+  fullName: string;
+  companyName?: string;
+  role?: string;
+}) {
+  try {
+    const { email, password, fullName, companyName, role = 'CLIENT' } = data;
+
+    // Check if user already exists
+    const existingUser = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+    });
+
+    if (existingUser) {
+      throw new Error('User already exists');
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create or find company
+    let company;
+    if (companyName) {
+      // Create new company
+      company = await prisma.company.create({
+        data: {
+          name: companyName,
+          domain: email.split('@')[1],
+        },
+      });
+    } else {
+      // Use default company or first company (for demo)
+      company = await prisma.company.findFirst();
+      
+      if (!company) {
+        // Create default company if none exists
+        company = await prisma.company.create({
+          data: {
+            name: 'Default Company',
+            domain: 'example.com',
+          },
+        });
+      }
+    }
+
+    // Create user
+    const user = await prisma.user.create({
+      data: {
+        email: email.toLowerCase(),
+        password: hashedPassword,
+        fullName,
+        role,
+        companyId: company.id,
+      },
+      include: {
+        company: true,
+      },
+    });
+
+    // Create welcome notification
+    await prisma.notification.create({
+      data: {
+        title: 'Welcome to Base44!',
+        message: `Welcome ${fullName}! Your account has been created successfully. Start by exploring the dashboard.`,
+        type: 'SUCCESS',
+        userId: user.id,
+      },
+    });
+
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.fullName,
+      role: user.role,
+      companyId: user.companyId,
+      companyName: user.company.name,
+    };
+  } catch (error) {
+    console.error('Error creating user:', error);
+    throw error;
+  }
+}
+
+// Update user password
+export async function updatePassword(userId: string, currentPassword: string, newPassword: string) {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Verify current password
+    const isValid = await bcrypt.compare(currentPassword, user.password);
+    
+    if (!isValid) {
+      throw new Error('Current password is incorrect');
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error updating password:', error);
+    throw error;
+  }
+}
+
+// Validate user credentials (for login)
+export async function validateCredentials(email: string, password: string) {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+      include: { company: true },
+    });
+
+    if (!user || !user.password) {
+      return null;
+    }
+
+    const isValid = await bcrypt.compare(password, user.password);
+
+    if (!isValid) {
+      return null;
+    }
+
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.fullName,
+      role: user.role,
+      companyId: user.companyId,
+      companyName: user.company.name,
+      image: user.avatar,
+    };
+  } catch (error) {
+    console.error('Error validating credentials:', error);
+    return null;
+  }
+}
+
+// Get user by ID
+export async function getUserById(userId: string) {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { company: true },
+    });
+
+    if (!user) {
+      return null;
+    }
+
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.fullName,
+      role: user.role,
+      companyId: user.companyId,
+      companyName: user.company.name,
+      phone: user.phone,
+      bio: user.bio,
+      avatar: user.avatar,
+      createdAt: user.createdAt,
+    };
+  } catch (error) {
+    console.error('Error getting user by ID:', error);
+    return null;
+  }
+}
+
+// Update user profile
+export async function updateUserProfile(userId: string, data: {
+  fullName?: string;
+  phone?: string;
+  bio?: string;
+  avatar?: string;
+}) {
+  try {
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data,
+      include: { company: true },
+    });
+
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.fullName,
+      role: user.role,
+      companyId: user.companyId,
+      companyName: user.company.name,
+      phone: user.phone,
+      bio: user.bio,
+      avatar: user.avatar,
+    };
+  } catch (error) {
+    console.error('Error updating user profile:', error);
+    throw error;
+  }
+}
+
+// Check authentication status (for API routes)
+export async function requireAuth() {
   const user = await getCurrentUser();
   
   if (!user) {
     throw new Error('Unauthorized');
   }
-  
+
   return user;
 }
 
-/**
- * Check if user is ADMIN (for API routes)
- */
-export async function requireAdminApi(): Promise<SessionUser> {
-  const user = await getAuthUser();
-  
-  if (user.role !== 'ADMIN') {
-    throw new Error('Forbidden: Admin access required');
+// Require specific role (for API routes)
+export async function requireRole(role: string | string[]) {
+  const user = await requireAuth();
+  const roles = Array.isArray(role) ? role : [role];
+
+  if (!roles.includes(user.role)) {
+    throw new Error('Forbidden');
   }
-  
+
   return user;
 }
 
-/**
- * Check company access (for API routes)
- */
-export async function requireCompanyAccessApi(companyId: string): Promise<SessionUser> {
-  const user = await getAuthUser();
-  
-  // ADMIN can access all companies
-  if (user.role === 'ADMIN') {
-    return user;
-  }
-  
-  // CLIENT can only access their own company
-  if (user.companyId !== companyId) {
-    throw new Error('Forbidden: Access denied to this company');
-  }
-  
-  return user;
+// Require admin role
+export async function requireAdmin() {
+  return requireRole('ADMIN');
 }
 
-/**
- * Require PENTESTER or ADMIN role (for API routes)
- */
-export async function requirePentester(): Promise<SessionUser> {
-  const user = await getAuthUser();
-  
-  if (user.role !== 'PENTESTER' && user.role !== 'ADMIN') {
-    throw new Error('Forbidden: Pentester or Admin access required');
-  }
-  
-  return user;
+// Require pentester role
+export async function requirePentester() {
+  return requireRole(['ADMIN', 'PENTESTER']);
 }

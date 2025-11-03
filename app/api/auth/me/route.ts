@@ -1,60 +1,120 @@
-import { NextResponse } from 'next/server';
-import { getAuthUser } from '@/lib/auth-helpers';
+import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { successResponse, unauthorizedResponse, errorResponse } from '@/lib/api-response';
 
-export async function GET() {
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+export async function GET(request: NextRequest) {
   try {
-    // Get authenticated user
-    const authUser = await getAuthUser();
+    // Get current session
+    const session = await getServerSession(authOptions);
 
-    // Fetch full user details with company
+    if (!session?.user?.email) {
+      return unauthorizedResponse();
+    }
+
+    // Get full user data
     const user = await prisma.user.findUnique({
-      where: { id: authUser.id },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        role: true,
-        avatar: true,
-        isActive: true,
-        companyId: true,
-        company: {
+      where: { email: session.user.email },
+      include: {
+        company: true,
+        notifications: {
+          where: { isRead: false },
+          take: 5,
+          orderBy: { createdAt: 'desc' },
+        },
+        _count: {
           select: {
-            id: true,
-            name: true,
-            logo: true,
-            industry: true,
+            notifications: { where: { isRead: false } },
+            findingsReported: true,
+            pentestsCreated: true,
+            comments: true,
           },
         },
-        createdAt: true,
-        updatedAt: true,
       },
     });
 
     if (!user) {
-      return NextResponse.json(
-        { success: false, error: 'User not found' },
-        { status: 404 }
-      );
+      return unauthorizedResponse('User not found');
     }
 
-    return NextResponse.json({
-      success: true,
-      data: user,
+    // Format response
+    const userData = {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      phone: user.phone,
+      avatar: user.avatar,
+      bio: user.bio,
+      company: {
+        id: user.company.id,
+        name: user.company.name,
+        domain: user.company.domain,
+        logo: user.company.logo,
+      },
+      notifications: user.notifications,
+      stats: {
+        unreadNotifications: user._count.notifications,
+        findingsReported: user._count.findingsReported,
+        pentestsCreated: user._count.pentestsCreated,
+        totalComments: user._count.comments,
+      },
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+
+    return successResponse(userData);
+  } catch (error) {
+    console.error('Error fetching current user:', error);
+    return errorResponse('Failed to fetch user data', 500);
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user?.email) {
+      return unauthorizedResponse();
+    }
+
+    const body = await request.json();
+    const { fullName, phone, bio, avatar } = body;
+
+    // Update user
+    const updatedUser = await prisma.user.update({
+      where: { email: session.user.email },
+      data: {
+        fullName,
+        phone,
+        bio,
+        avatar,
+      },
+      include: {
+        company: true,
+      },
+    });
+
+    return successResponse({
+      id: updatedUser.id,
+      email: updatedUser.email,
+      fullName: updatedUser.fullName,
+      role: updatedUser.role,
+      phone: updatedUser.phone,
+      avatar: updatedUser.avatar,
+      bio: updatedUser.bio,
+      company: {
+        id: updatedUser.company.id,
+        name: updatedUser.company.name,
+      },
     });
   } catch (error) {
-    console.error('Get current user error:', error);
-
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch user' },
-      { status: 500 }
-    );
+    console.error('Error updating user:', error);
+    return errorResponse('Failed to update user', 500);
   }
 }

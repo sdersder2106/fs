@@ -1,113 +1,147 @@
 'use client';
 
 import React from 'react';
-import { Shield, CreditCard, FileCheck, Lock, Heart, AlertTriangle } from 'lucide-react';
-
-interface ComplianceItem {
-  standard: string;
-  failedCount: number;
-  icon: string;
-  color: string;
-}
+import { cn } from '@/lib/utils';
+import { CheckCircle, XCircle, AlertCircle, Clock } from 'lucide-react';
 
 interface ComplianceCardProps {
-  data?: ComplianceItem[];
+  standard: 'SOC2' | 'PCI-DSS' | 'ISO27001' | 'GDPR' | 'HIPAA' | 'OWASP';
+  status: 'compliant' | 'partial' | 'non-compliant' | 'pending';
+  score?: number;
+  details?: string;
+  lastAudit?: Date | string;
+  nextAudit?: Date | string;
+  className?: string;
 }
 
-export function ComplianceCard({ data }: ComplianceCardProps) {
-  // Default demo data
-  const defaultData: ComplianceItem[] = [
-    { standard: 'SOC2', failedCount: 0, icon: 'shield', color: 'blue' },
-    { standard: 'PCI-DSS', failedCount: 8, icon: 'credit-card', color: 'green' },
-    { standard: 'ISO 27001', failedCount: 8, icon: 'file-check', color: 'blue' },
-    { standard: 'GDPR', failedCount: 2, icon: 'lock', color: 'blue' },
-    { standard: 'HIPAA', failedCount: 8, icon: 'heart', color: 'cyan' },
-    { standard: 'OWASP', failedCount: 8, icon: 'alert', color: 'purple' },
-  ];
-
-  const complianceData = data || defaultData;
-
-  const getIcon = (iconName: string) => {
-    switch (iconName) {
-      case 'shield':
-        return Shield;
-      case 'credit-card':
-        return CreditCard;
-      case 'file-check':
-        return FileCheck;
-      case 'lock':
-        return Lock;
-      case 'heart':
-        return Heart;
-      case 'alert':
-        return AlertTriangle;
-      default:
-        return Shield;
-    }
+export const ComplianceCard: React.FC<ComplianceCardProps> = ({
+  standard,
+  status,
+  score,
+  details,
+  lastAudit,
+  nextAudit,
+  className,
+}) => {
+  const statusConfig = {
+    compliant: {
+      icon: <CheckCircle className="w-5 h-5" />,
+      color: 'text-green-600',
+      bgColor: 'bg-green-50',
+      borderColor: 'border-green-200',
+      label: 'Compliant',
+    },
+    partial: {
+      icon: <AlertCircle className="w-5 h-5" />,
+      color: 'text-yellow-600',
+      bgColor: 'bg-yellow-50',
+      borderColor: 'border-yellow-200',
+      label: 'Partially Compliant',
+    },
+    'non-compliant': {
+      icon: <XCircle className="w-5 h-5" />,
+      color: 'text-red-600',
+      bgColor: 'bg-red-50',
+      borderColor: 'border-red-200',
+      label: 'Non-Compliant',
+    },
+    pending: {
+      icon: <Clock className="w-5 h-5" />,
+      color: 'text-gray-600',
+      bgColor: 'bg-gray-50',
+      borderColor: 'border-gray-200',
+      label: 'Pending Audit',
+    },
   };
 
-  const getColorClasses = (color: string) => {
-    const colors: Record<string, { bg: string; text: string }> = {
-      blue: { bg: 'bg-blue-100', text: 'text-blue-600' },
-      green: { bg: 'bg-green-100', text: 'text-green-600' },
-      cyan: { bg: 'bg-cyan-100', text: 'text-cyan-600' },
-      purple: { bg: 'bg-purple-100', text: 'text-purple-600' },
-    };
-    return colors[color] || colors.blue;
+  const config = statusConfig[status];
+
+  const formatDate = (date: Date | string) => {
+    const d = typeof date === 'string' ? new Date(date) : date;
+    return d.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric' 
+    });
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 90) return 'text-green-600';
+    if (score >= 70) return 'text-yellow-600';
+    if (score >= 50) return 'text-orange-600';
+    return 'text-red-600';
+  };
+
+  const standardLogos: Record<string, string> = {
+    'SOC2': '🔒',
+    'PCI-DSS': '💳',
+    'ISO27001': '🏆',
+    'GDPR': '🇪🇺',
+    'HIPAA': '🏥',
+    'OWASP': '🛡️',
   };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2">
-          <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-            <AlertTriangle className="w-5 h-5 text-red-600" />
-          </div>
+    <div
+      className={cn(
+        'bg-white rounded-xl border p-6 hover:shadow-md transition-all',
+        config.borderColor,
+        className
+      )}
+    >
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center">
+          <span className="text-2xl mr-3">{standardLogos[standard]}</span>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">
-              Failed Compliances
-            </h3>
-            <span className="inline-flex items-center px-2 py-1 text-xs font-medium bg-red-100 text-red-700 rounded-full">
-              34
-            </span>
+            <h3 className="text-lg font-semibold text-gray-900">{standard}</h3>
+            <div className={cn('flex items-center mt-1', config.color)}>
+              {config.icon}
+              <span className="ml-2 text-sm font-medium">{config.label}</span>
+            </div>
           </div>
         </div>
-        <select className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option>Last month</option>
-          <option>Last 3 months</option>
-          <option>Last 6 months</option>
-        </select>
+        {score !== undefined && (
+          <div className="text-right">
+            <div className={cn('text-2xl font-bold', getScoreColor(score))}>
+              {score}%
+            </div>
+            <div className="text-xs text-gray-500 uppercase">Score</div>
+          </div>
+        )}
       </div>
 
-      {/* Compliance Grid */}
-      <div className="grid grid-cols-2 gap-4">
-        {complianceData.map((item, index) => {
-          const Icon = getIcon(item.icon);
-          const colors = getColorClasses(item.color);
-          
-          return (
-            <div
-              key={index}
-              className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              {/* Icon */}
-              <div className={`w-12 h-12 ${colors.bg} rounded-lg flex items-center justify-center flex-shrink-0`}>
-                <Icon className={`w-6 h-6 ${colors.text}`} />
-              </div>
-              
-              {/* Info */}
-              <div className="flex-1 min-w-0">
-                <p className="text-2xl font-bold text-gray-900">
-                  {item.failedCount}
-                </p>
-                <p className="text-sm text-gray-600 truncate">
-                  {item.standard}
-                </p>
-              </div>
-            </div>
-          );
-        })}
+      {details && (
+        <p className="text-sm text-gray-600 mb-4">{details}</p>
+      )}
+
+      <div className="flex justify-between text-xs text-gray-500">
+        {lastAudit && (
+          <div>
+            <span className="font-medium">Last Audit:</span> {formatDate(lastAudit)}
+          </div>
+        )}
+        {nextAudit && (
+          <div>
+            <span className="font-medium">Next Audit:</span> {formatDate(nextAudit)}
+          </div>
+        )}
       </div>
+
+      {score !== undefined && (
+        <div className="mt-4">
+          <div className="w-full bg-gray-200 rounded-full h-2">
+            <div
+              className={cn(
+                'h-2 rounded-full transition-all',
+                score >= 90 ? 'bg-green-500' :
+                score >= 70 ? 'bg-yellow-500' :
+                score >= 50 ? 'bg-orange-500' : 'bg-red-500'
+              )}
+              style={{ width: `${score}%` }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
-}
+};
