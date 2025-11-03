@@ -9,8 +9,8 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { Card } from '@/components/ui';
-import { StatCard } from '@/components/cards/StatCard';
-import { ComplianceCard } from '@/components/cards/ComplianceCard';
+import StatCard from '@/components/cards/StatCard'; // Default import
+import ComplianceCard from '@/components/cards/ComplianceCard'; // Default import
 import { VulnerabilitySeverityChart } from '@/components/charts/VulnerabilitySeverityChart';
 import { VulnerabilityBreakdownChart } from '@/components/charts/VulnerabilityBreakdownChart';
 import { RecentActivity } from '@/components/lists/RecentActivity';
