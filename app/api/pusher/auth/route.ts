@@ -1,75 +1,65 @@
-import { NextRequest, NextResponse } from 'next/server';
-import Pusher from 'pusher';
+import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import Pusher from 'pusher';
 
-// Initialiser Pusher avec vos credentials
 const pusher = new Pusher({
-  appId: process.env.PUSHER_APP_ID || '2072966',
-  key: process.env.NEXT_PUBLIC_PUSHER_KEY || '0ad42094e8713af8969b',
-  secret: process.env.PUSHER_SECRET || '9c3e8d55a6c9ade97ee7',
-  cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || 'eu',
+  appId: process.env.PUSHER_APP_ID!,
+  key: process.env.NEXT_PUBLIC_PUSHER_KEY!,
+  secret: process.env.PUSHER_SECRET!,
+  cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
   useTLS: true,
 });
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
-    // Vérifier l'authentification
     const session = await getServerSession(authOptions);
-    
+
     if (!session?.user) {
-      return NextResponse.json(
-        { error: 'Non autorisé' }, 
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Récupérer les données du formulaire
-    const formData = await request.formData();
-    const socketId = formData.get('socket_id') as string;
-    const channelName = formData.get('channel_name') as string;
+    const body = await request.text();
+    const params = new URLSearchParams(body);
+    const socketId = params.get('socket_id');
+    const channelName = params.get('channel_name');
 
     if (!socketId || !channelName) {
-      return NextResponse.json(
-        { error: 'Paramètres manquants' }, 
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
     }
 
-    // Récupérer l'ID utilisateur et compagnie de la session
-    const userId = session.user.id;
-    const companyId = session.user.companyId;
+    const userId = (session.user as any).id;
+    const companyId = (session.user as any).companyId;
 
-    // Vérifier les permissions pour le canal
-    const allowedChannels = [
-      `private-user-${userId}`,
-      `private-company-${companyId}`,
-    ];
-
-    if (!allowedChannels.includes(channelName)) {
-      console.log(`❌ Accès refusé au canal: ${channelName}`);
-      return NextResponse.json(
-        { error: 'Accès refusé à ce canal' }, 
-        { status: 403 }
-      );
+    // Verify user has access to the channel
+    if (channelName.startsWith('private-user-')) {
+      const requestedUserId = channelName.replace('private-user-', '');
+      if (requestedUserId !== userId) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
     }
 
-    // Autoriser le canal
-    const authResponse = pusher.authorizeChannel(socketId, channelName, {
+    if (channelName.startsWith('private-company-')) {
+      const requestedCompanyId = channelName.replace('private-company-', '');
+      if (requestedCompanyId !== companyId) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+    }
+
+    const auth = pusher.authorizeChannel(socketId, channelName, {
       user_id: userId,
       user_info: {
-        name: session.user.name || 'Utilisateur',
+        name: session.user.name,
         email: session.user.email,
+        role: session.user.role,
       },
     });
 
-    console.log(`✅ Canal autorisé: ${channelName} pour l'utilisateur: ${userId}`);
-    
-    return NextResponse.json(authResponse);
+    return NextResponse.json(auth);
   } catch (error) {
-    console.error('❌ Erreur auth Pusher:', error);
+    console.error('Pusher auth error:', error);
     return NextResponse.json(
-      { error: 'Erreur serveur' }, 
+      { error: 'Failed to authenticate' },
       { status: 500 }
     );
   }

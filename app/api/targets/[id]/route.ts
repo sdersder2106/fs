@@ -1,73 +1,64 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { requireAuth, requirePentester } from '@/lib/auth-helpers';
-import { 
-  successResponse, 
-  errorResponse, 
-  unauthorizedResponse,
-  forbiddenResponse,
-  notFoundResponse,
-  updatedResponse,
-  deletedResponse
-} from '@/lib/api-response';
-import { updateTargetSchema } from '@/lib/validations';
-import { notificationTemplates, createNotification } from '@/lib/notifications';
+import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import prisma from '@/lib/prisma';
+import { z } from 'zod';
 
-interface RouteParams {
-  params: { id: string };
-}
+const targetSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  description: z.string().optional(),
+  url: z.string().optional(),
+  ipAddress: z.string().optional(),
+  targetType: z.enum(['WEB_APPLICATION', 'API_ENDPOINT', 'NETWORK_INFRASTRUCTURE', 'MOBILE_APPLICATION', 'CLOUD_RESOURCES']),
+  criticalityLevel: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']),
+  technologyStack: z.array(z.string()).default([]),
+  businessImpact: z.string().optional(),
+  owner: z.string().optional(),
+  nextAssessment: z.string().optional(),
+});
 
-// GET /api/targets/[id] - Get single target with details
-export async function GET(request: NextRequest, { params }: RouteParams) {
+// GET - Get single target
+export async function GET(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
   try {
-    const user = await requireAuth();
-    const { id } = params;
+    const session = await getServerSession(authOptions);
 
-    const target = await prisma.target.findFirst({
-      where: { 
-        id,
-        companyId: user.companyId,
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const target = await prisma.target.findUnique({
+      where: {
+        id: params.id,
+        companyId: session.user.companyId,
       },
       include: {
         pentests: {
-          orderBy: { createdAt: 'desc' },
-          take: 5,
-          include: {
-            createdBy: {
-              select: {
-                id: true,
-                fullName: true,
-                email: true,
-                avatar: true,
-              },
-            },
-            _count: {
-              select: {
-                findings: true,
-              },
-            },
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            startDate: true,
+            endDate: true,
+          },
+          orderBy: {
+            startDate: 'desc',
           },
         },
         findings: {
-          where: { status: { in: ['OPEN', 'IN_PROGRESS'] } },
-          orderBy: { severity: 'asc' },
-          take: 10,
-          include: {
-            reporter: {
-              select: {
-                id: true,
-                fullName: true,
-                email: true,
-                avatar: true,
-              },
-            },
-            pentest: {
-              select: {
-                id: true,
-                title: true,
-              },
-            },
+          select: {
+            id: true,
+            title: true,
+            severity: true,
+            status: true,
+            createdAt: true,
           },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 10,
         },
         _count: {
           select: {
@@ -79,323 +70,147 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     });
 
     if (!target) {
-      return notFoundResponse('Target');
+      return NextResponse.json({ error: 'Target not found' }, { status: 404 });
     }
 
-    // Calculate vulnerability statistics
-    const vulnerabilityStats = await prisma.finding.groupBy({
-      by: ['severity', 'status'],
-      where: { targetId: id },
-      _count: true,
-    });
-
-    const stats = {
-      bySeverity: {
-        CRITICAL: 0,
-        HIGH: 0,
-        MEDIUM: 0,
-        LOW: 0,
-        INFO: 0,
-      },
-      byStatus: {
-        OPEN: 0,
-        IN_PROGRESS: 0,
-        RESOLVED: 0,
-        CLOSED: 0,
-      },
-    };
-
-    vulnerabilityStats.forEach(stat => {
-      if (stat.severity) {
-        stats.bySeverity[stat.severity as keyof typeof stats.bySeverity] += stat._count;
-      }
-      if (stat.status) {
-        stats.byStatus[stat.status as keyof typeof stats.byStatus] += stat._count;
-      }
-    });
-
-    // Calculate risk score trend (simplified)
-    const riskTrend = await calculateRiskTrend(id);
-
-    // Format response
-    const responseData = {
-      ...target,
-      vulnerabilityStats: stats,
-      riskTrend,
-      recentPentests: target.pentests.map(p => ({
-        ...p,
-        findingsCount: p._count.findings,
-      })),
-      activeFindings: target.findings,
-    };
-
-    return successResponse(responseData);
+    return NextResponse.json(target);
   } catch (error) {
-    console.error('Error fetching target:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-    }
-    
-    return errorResponse('Failed to fetch target', 500);
+    console.error('Get target error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch target' },
+      { status: 500 }
+    );
   }
 }
 
-// PUT /api/targets/[id] - Update target
-export async function PUT(request: NextRequest, { params }: RouteParams) {
+// PUT - Update target
+export async function PUT(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
   try {
-    const user = await requirePentester();
-    const { id } = params;
-    const body = await request.json();
-    
-    // Validate input
-    const validationResult = updateTargetSchema.safeParse({ ...body, id });
-    
-    if (!validationResult.success) {
-      return errorResponse(validationResult.error, 400);
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check if target exists
-    const existingTarget = await prisma.target.findFirst({
-      where: { 
-        id,
-        companyId: user.companyId,
+    // Check permissions
+    if (!['ADMIN', 'AUDITOR'].includes(session.user.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    // Check if target exists and belongs to company
+    const existingTarget = await prisma.target.findUnique({
+      where: {
+        id: params.id,
+        companyId: session.user.companyId,
       },
     });
 
     if (!existingTarget) {
-      return notFoundResponse('Target');
+      return NextResponse.json({ error: 'Target not found' }, { status: 404 });
     }
 
-    const {
-      name,
-      type,
-      url,
-      ipAddress,
-      description,
-      status,
-      riskScore,
-      scope,
-    } = validationResult.data;
+    const body = await request.json();
+    const validatedData = targetSchema.parse(body);
 
-    // Check for duplicate if changing identifiers
-    if (name && name !== existingTarget.name ||
-        url && url !== existingTarget.url ||
-        ipAddress && ipAddress !== existingTarget.ipAddress) {
-      
-      const duplicate = await prisma.target.findFirst({
-        where: {
-          companyId: user.companyId,
-          NOT: { id },
-          OR: [
-            ...(name ? [{ name: { equals: name, mode: 'insensitive' } }] : []),
-            ...(url ? [{ url: { equals: url, mode: 'insensitive' } }] : []),
-            ...(ipAddress ? [{ ipAddress }] : []),
-          ],
-        },
-      });
-
-      if (duplicate) {
-        return errorResponse('A target with this name, URL, or IP address already exists', 409);
-      }
-    }
-
-    // Track risk score changes for notifications
-    const riskChanged = riskScore !== undefined && riskScore !== existingTarget.riskScore;
-    const riskIncreased = riskChanged && riskScore > existingTarget.riskScore && riskScore >= 80;
-
-    // Update target
-    const updatedTarget = await prisma.target.update({
-      where: { id },
+    const target = await prisma.target.update({
+      where: {
+        id: params.id,
+      },
       data: {
-        ...(name && { name }),
-        ...(type && { type }),
-        ...(url !== undefined && { url }),
-        ...(ipAddress !== undefined && { ipAddress }),
-        ...(description !== undefined && { description }),
-        ...(status && { status }),
-        ...(riskScore !== undefined && { riskScore }),
-        ...(scope !== undefined && { scope }),
-      },
-      include: {
-        _count: {
-          select: {
-            pentests: true,
-            findings: true,
-          },
-        },
+        ...validatedData,
+        nextAssessment: validatedData.nextAssessment
+          ? new Date(validatedData.nextAssessment)
+          : null,
       },
     });
 
-    // Send notification if risk increased significantly
-    if (riskIncreased) {
-      const notification = notificationTemplates.targetRiskChanged(
-        updatedTarget.name,
-        updatedTarget.riskScore,
-        updatedTarget.id
-      );
-      
-      // Notify admins and pentesters
-      const adminsAndPentesters = await prisma.user.findMany({
-        where: {
-          companyId: user.companyId,
-          role: { in: ['ADMIN', 'PENTESTER'] },
-        },
-        select: { id: true },
-      });
-
-      await Promise.all(
-        adminsAndPentesters.map(u => 
-          createNotification({ userId: u.id, ...notification })
-        )
-      );
-    }
-
-    const responseData = {
-      id: updatedTarget.id,
-      name: updatedTarget.name,
-      type: updatedTarget.type,
-      url: updatedTarget.url,
-      ipAddress: updatedTarget.ipAddress,
-      description: updatedTarget.description,
-      status: updatedTarget.status,
-      riskScore: updatedTarget.riskScore,
-      scope: updatedTarget.scope,
-      stats: {
-        pentests: updatedTarget._count.pentests,
-        findings: updatedTarget._count.findings,
+    // Log activity
+    await prisma.activityLog.create({
+      data: {
+        type: 'UPDATE',
+        entity: 'TARGET',
+        entityId: target.id,
+        action: `Updated target: ${target.name}`,
+        userId: session.user.id,
       },
-      updatedAt: updatedTarget.updatedAt,
-    };
+    });
 
-    return updatedResponse(responseData, 'Target updated successfully');
+    return NextResponse.json(target);
   } catch (error) {
-    console.error('Error updating target:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-      if (error.message === 'Forbidden') {
-        return forbiddenResponse();
-      }
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: error.errors },
+        { status: 400 }
+      );
     }
-    
-    return errorResponse('Failed to update target', 500);
+
+    console.error('Update target error:', error);
+    return NextResponse.json(
+      { error: 'Failed to update target' },
+      { status: 500 }
+    );
   }
 }
 
-// DELETE /api/targets/[id] - Delete target
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
+// DELETE - Delete target (soft delete)
+export async function DELETE(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
   try {
-    const user = await requirePentester();
-    const { id } = params;
+    const session = await getServerSession(authOptions);
 
-    // Check if target exists
-    const target = await prisma.target.findFirst({
-      where: { 
-        id,
-        companyId: user.companyId,
-      },
-      include: {
-        _count: {
-          select: {
-            pentests: true,
-            findings: true,
-          },
-        },
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Check permissions - only admins can delete
+    if (session.user.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    // Check if target exists and belongs to company
+    const existingTarget = await prisma.target.findUnique({
+      where: {
+        id: params.id,
+        companyId: session.user.companyId,
       },
     });
 
-    if (!target) {
-      return notFoundResponse('Target');
+    if (!existingTarget) {
+      return NextResponse.json({ error: 'Target not found' }, { status: 404 });
     }
 
-    // Only admins can delete targets
-    if (user.role !== 'ADMIN') {
-      return forbiddenResponse('Only admins can delete targets');
-    }
-
-    // Prevent deletion if there are pentests or findings
-    if (target._count.pentests > 0) {
-      return errorResponse('Cannot delete target with existing pentests', 400);
-    }
-
-    if (target._count.findings > 0) {
-      return errorResponse('Cannot delete target with existing findings', 400);
-    }
-
-    // Delete target
-    await prisma.target.delete({
-      where: { id },
+    // Soft delete - just mark as inactive
+    const target = await prisma.target.update({
+      where: {
+        id: params.id,
+      },
+      data: {
+        isActive: false,
+      },
     });
 
-    return deletedResponse('Target deleted successfully');
+    // Log activity
+    await prisma.activityLog.create({
+      data: {
+        type: 'DELETE',
+        entity: 'TARGET',
+        entityId: target.id,
+        action: `Deleted target: ${target.name}`,
+        userId: session.user.id,
+      },
+    });
+
+    return NextResponse.json({ success: true, message: 'Target deleted' });
   } catch (error) {
-    console.error('Error deleting target:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-      if (error.message === 'Forbidden') {
-        return forbiddenResponse();
-      }
-    }
-    
-    return errorResponse('Failed to delete target', 500);
+    console.error('Delete target error:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete target' },
+      { status: 500 }
+    );
   }
-}
-
-// Helper function to calculate risk trend
-async function calculateRiskTrend(targetId: string) {
-  // This is a simplified risk trend calculation
-  // In production, this would analyze historical data
-  
-  const recentFindings = await prisma.finding.findMany({
-    where: {
-      targetId,
-      createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }, // Last 30 days
-    },
-    select: {
-      severity: true,
-      status: true,
-      createdAt: true,
-    },
-    orderBy: { createdAt: 'asc' },
-  });
-
-  // Group by week
-  const weeks: Record<string, number> = {};
-  
-  recentFindings.forEach(finding => {
-    const weekKey = getWeekKey(finding.createdAt);
-    if (!weeks[weekKey]) weeks[weekKey] = 0;
-    
-    // Weight by severity
-    const weight = {
-      CRITICAL: 10,
-      HIGH: 7,
-      MEDIUM: 4,
-      LOW: 2,
-      INFO: 1,
-    }[finding.severity] || 1;
-    
-    // Reduce weight if resolved
-    const statusMultiplier = finding.status === 'RESOLVED' || finding.status === 'CLOSED' ? 0.2 : 1;
-    
-    weeks[weekKey] += weight * statusMultiplier;
-  });
-
-  return Object.entries(weeks).map(([week, score]) => ({
-    week,
-    riskScore: Math.min(100, score * 5), // Scale to 0-100
-  }));
-}
-
-function getWeekKey(date: Date): string {
-  const week = Math.floor(date.getTime() / (7 * 24 * 60 * 60 * 1000));
-  return `Week ${week}`;
 }

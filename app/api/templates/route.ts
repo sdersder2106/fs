@@ -1,251 +1,110 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/auth-helpers';
-import { 
-  successResponse, 
-  errorResponse, 
-  unauthorizedResponse,
-  forbiddenResponse,
-  createdResponse,
-  getPaginationParams,
-  getQueryParams,
-  getSortParams,
-  paginatedResponse
-} from '@/lib/api-response';
-import { createTemplateSchema } from '@/lib/validations';
+import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import prisma from '@/lib/prisma';
+import { z } from 'zod';
 
-// GET /api/templates - List templates (ADMIN only)
-export async function GET(request: NextRequest) {
+const templateSchema = z.object({
+  title: z.string().min(1, 'Title is required'),
+  description: z.string().min(1, 'Description is required'),
+  severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFORMATIONAL']),
+  cvssVector: z.string().optional(),
+  reproductionSteps: z.string().optional(),
+  recommendedFix: z.string().optional(),
+  owaspCategory: z.string().optional(),
+  isPublic: z.boolean().default(false),
+});
+
+// GET - List all templates
+export async function GET(request: Request) {
   try {
-    const user = await requireAdmin();
-    const params = getQueryParams(request);
-    const { page, limit, skip } = getPaginationParams(params);
-    const { sortBy, sortOrder } = getSortParams(params);
-    
-    // Parse filters
-    const filters = {
-      type: params.get('type'),
-      category: params.get('category'),
-      isPublic: params.get('isPublic'),
-      query: params.get('query'),
-    };
+    const session = await getServerSession(authOptions);
 
-    // Build where clause
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get('search') || '';
+    const severity = searchParams.get('severity');
+
     const where: any = {
       OR: [
-        { companyId: user.companyId },
+        { companyId: session.user.companyId },
         { isPublic: true },
       ],
     };
 
-    if (filters.type) {
-      where.type = filters.type;
-    }
-
-    if (filters.category) {
-      where.category = filters.category;
-    }
-
-    if (filters.isPublic !== null) {
-      where.isPublic = filters.isPublic === 'true';
-    }
-
-    if (filters.query) {
+    if (search) {
       where.AND = [
         {
           OR: [
-            { name: { contains: filters.query, mode: 'insensitive' } },
-            { description: { contains: filters.query, mode: 'insensitive' } },
-            { category: { contains: filters.query, mode: 'insensitive' } },
+            { title: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+            { owaspCategory: { contains: search, mode: 'insensitive' } },
           ],
         },
       ];
     }
 
-    // Get templates
-    const [templates, total] = await Promise.all([
-      prisma.template.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { [sortBy]: sortOrder },
-        include: {
-          company: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-          _count: {
-            select: {
-              id: true, // This is just to get a count, we'll use it as usage count
-            },
-          },
-        },
-      }),
-      prisma.template.count({ where }),
-    ]);
+    if (severity) {
+      where.severity = severity;
+    }
 
-    // Get usage statistics for each template
-    const templatesWithStats = await Promise.all(
-      templates.map(async (template) => {
-        // Count how many times this template content appears in findings/reports
-        const usageCount = await getTemplateUsageCount(template.id, template.type);
-        
-        return {
-          id: template.id,
-          name: template.name,
-          description: template.description,
-          type: template.type,
-          category: template.category,
-          content: template.content,
-          isPublic: template.isPublic,
-          company: template.company,
-          usageCount,
-          createdAt: template.createdAt,
-          updatedAt: template.updatedAt,
-        };
-      })
+    const templates = await prisma.findingTemplate.findMany({
+      where,
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    return NextResponse.json(templates);
+  } catch (error) {
+    console.error('Get templates error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch templates' },
+      { status: 500 }
     );
-
-    return paginatedResponse(templatesWithStats, page, limit, total);
-  } catch (error) {
-    console.error('Error fetching templates:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-      if (error.message === 'Forbidden') {
-        return forbiddenResponse('Admin access required');
-      }
-    }
-    
-    return errorResponse('Failed to fetch templates', 500);
   }
 }
 
-// POST /api/templates - Create new template (ADMIN only)
-export async function POST(request: NextRequest) {
+// POST - Create new template
+export async function POST(request: Request) {
   try {
-    const user = await requireAdmin();
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Check permissions
+    if (!['ADMIN', 'AUDITOR'].includes(session.user.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const body = await request.json();
-    
-    // Validate input
-    const validationResult = createTemplateSchema.safeParse({
-      ...body,
-      companyId: user.companyId,
-    });
-    
-    if (!validationResult.success) {
-      return errorResponse(validationResult.error, 400);
-    }
+    const validatedData = templateSchema.parse(body);
 
-    const { name, description, type, category, content, isPublic } = validationResult.data;
-
-    // Check for duplicate template name in company
-    const existingTemplate = await prisma.template.findFirst({
-      where: {
-        name: { equals: name, mode: 'insensitive' },
-        companyId: user.companyId,
-      },
-    });
-
-    if (existingTemplate) {
-      return errorResponse('A template with this name already exists', 409);
-    }
-
-    // Validate template variables (basic check)
-    const variables = extractTemplateVariables(content);
-    if (variables.length > 0) {
-      // Validate that variables use correct format {{variable}}
-      const invalidVariables = variables.filter(v => !v.match(/^[a-zA-Z][a-zA-Z0-9_]*$/));
-      if (invalidVariables.length > 0) {
-        return errorResponse(`Invalid template variables: ${invalidVariables.join(', ')}`, 400);
-      }
-    }
-
-    // Create template
-    const template = await prisma.template.create({
+    const template = await prisma.findingTemplate.create({
       data: {
-        name,
-        description,
-        type,
-        category,
-        content,
-        isPublic: isPublic || false,
-        companyId: user.companyId,
-      },
-      include: {
-        company: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
+        ...validatedData,
+        companyId: session.user.companyId,
       },
     });
 
-    const responseData = {
-      id: template.id,
-      name: template.name,
-      description: template.description,
-      type: template.type,
-      category: template.category,
-      content: template.content,
-      isPublic: template.isPublic,
-      company: template.company,
-      variables,
-      createdAt: template.createdAt,
-    };
-
-    return createdResponse(responseData, 'Template created successfully');
+    return NextResponse.json(template, { status: 201 });
   } catch (error) {
-    console.error('Error creating template:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-      if (error.message === 'Forbidden') {
-        return forbiddenResponse('Admin access required');
-      }
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: error.errors },
+        { status: 400 }
+      );
     }
-    
-    return errorResponse('Failed to create template', 500);
-  }
-}
 
-// Helper function to extract template variables
-function extractTemplateVariables(content: string): string[] {
-  const regex = /\{\{([^}]+)\}\}/g;
-  const variables: string[] = [];
-  let match;
-  
-  while ((match = regex.exec(content)) !== null) {
-    if (!variables.includes(match[1].trim())) {
-      variables.push(match[1].trim());
-    }
+    console.error('Create template error:', error);
+    return NextResponse.json(
+      { error: 'Failed to create template' },
+      { status: 500 }
+    );
   }
-  
-  return variables;
-}
-
-// Helper function to get template usage count
-async function getTemplateUsageCount(templateId: string, type: string): Promise<number> {
-  // In a real implementation, you would track template usage
-  // For now, return a simulated count based on template age
-  const template = await prisma.template.findUnique({
-    where: { id: templateId },
-    select: { createdAt: true },
-  });
-  
-  if (!template) return 0;
-  
-  // Simulate usage based on days since creation
-  const daysSinceCreation = Math.floor(
-    (Date.now() - template.createdAt.getTime()) / (1000 * 60 * 60 * 24)
-  );
-  
-  return Math.min(daysSinceCreation * 2, 100); // Max 100 uses
 }

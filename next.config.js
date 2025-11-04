@@ -2,46 +2,75 @@
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
-  eslint: {
-    // Ignore ESLint errors during production build
-    ignoreDuringBuilds: true,
+  
+  // Output standalone for Railway
+  output: 'standalone',
+  
+  // Security headers
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'X-DNS-Prefetch-Control',
+            value: 'on',
+          },
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=63072000; includeSubDomains; preload',
+          },
+          {
+            key: 'X-Frame-Options',
+            value: 'SAMEORIGIN',
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'X-XSS-Protection',
+            value: '1; mode=block',
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'origin-when-cross-origin',
+          },
+        ],
+      },
+    ];
   },
-  typescript: {
-    // Ignore TypeScript errors during production build
-    ignoreBuildErrors: true,
-  },
+  
   images: {
-    domains: ['localhost', 'base44.vercel.app'],
     remotePatterns: [
       {
         protocol: 'https',
         hostname: '**',
       },
     ],
-    // Disable image optimization for simpler deployment
-    unoptimized: true,
+    formats: ['image/avif', 'image/webp'],
   },
+  
   experimental: {
-    serverActions: {
-      bodySizeLimit: '10mb',
-    },
+    serverComponentsExternalPackages: ['bcryptjs'],
   },
-  async headers() {
-    return [
-      {
-        source: '/api/:path*',
-        headers: [
-          { key: 'Access-Control-Allow-Credentials', value: 'true' },
-          { key: 'Access-Control-Allow-Origin', value: '*' },
-          { key: 'Access-Control-Allow-Methods', value: 'GET,OPTIONS,PATCH,DELETE,POST,PUT' },
-          { key: 'Access-Control-Allow-Headers', value: 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version' },
-        ],
-      },
-    ];
+  
+  typescript: {
+    ignoreBuildErrors: false,
   },
-  // Performance optimizations
+  
+  eslint: {
+    ignoreDuringBuilds: false,
+  },
+  
+  // Hide powered by header
   poweredByHeader: false,
+  
+  // Enable compression
   compress: true,
-};
+  
+  // Disable production source maps
+  productionBrowserSourceMaps: false,
+}
 
-module.exports = nextConfig;
+module.exports = nextConfig

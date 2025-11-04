@@ -1,164 +1,316 @@
-# Base44 - Penetration Testing Management Platform
+# 🔐 BASE44 - Professional Security Audit Platform
 
-A comprehensive SaaS application for managing penetration tests, vulnerabilities, targets, and security reports.
+A comprehensive SaaS application for managing penetration tests, tracking vulnerabilities, and generating professional security reports.
 
 ## 🚀 Features
 
-- **Authentication & Authorization**: Multi-company support with RBAC (ADMIN, PENTESTER, CLIENT)
-- **Dashboard**: Real-time statistics, vulnerability charts, and compliance tracking
-- **Pentest Management**: Complete lifecycle from scheduling to reporting
-- **Target Management**: Track web apps, APIs, mobile apps, cloud, hosts, and networks
-- **Finding Management**: CVSS scoring, evidence collection, and remediation tracking
-- **Templates**: Reusable templates for findings and reports
-- **Reports**: Generate executive, technical, and full reports
-- **Collaboration**: Comments, notifications, and activity tracking
+- **Multi-tenant Architecture** - Complete data isolation per company
+- **Role-based Access Control** - Admin, Auditor, and Client roles
+- **Target Management** - Track web apps, APIs, networks, and cloud resources
+- **Penetration Test Management** - Full lifecycle from planning to completion
+- **Vulnerability Tracking** - CVSS 3.1 scoring with detailed findings
+- **Real-time Collaboration** - Comments, mentions, and live updates via Pusher
+- **Professional Reports** - Generate executive and technical reports
+- **Dashboard & Analytics** - Comprehensive metrics and visualizations
+- **Activity Logging** - Complete audit trail for compliance
 
-## 🛠 Tech Stack
+## 🛠️ Tech Stack
 
-- **Frontend**: Next.js 14, React 18, TypeScript, Tailwind CSS
-- **Backend**: Next.js API Routes, Prisma ORM
-- **Database**: PostgreSQL
-- **Authentication**: NextAuth.js
-- **Charts**: Recharts
+### Frontend
+- **Framework**: Next.js 14.2.5 with App Router
+- **Language**: TypeScript 5.3
+- **Styling**: Tailwind CSS 3.4
+- **UI Components**: Radix UI
 - **Icons**: Lucide React
+- **Forms**: React Hook Form + Zod
+- **Charts**: Recharts
+- **State Management**: Zustand + React Query
 
-## 📦 Installation
+### Backend
+- **API**: Next.js API Routes
+- **ORM**: Prisma 5.7
+- **Database**: PostgreSQL
+- **Authentication**: NextAuth.js 4.24
+- **Real-time**: Pusher (Railway compatible)
+- **File Upload**: Multer
 
-1. **Clone the repository**
+### Deployment
+- **Platform**: Railway
+- **Node Version**: 18+
+
+## 📋 Prerequisites
+
+- Node.js 18.x or higher
+- npm 9.x or higher
+- PostgreSQL database
+- Pusher account (free tier available)
+
+## 🔧 Installation
+
+### 1. Clone the repository
+
 ```bash
-git clone https://github.com/yourusername/base44.git
+git clone <repository-url>
 cd base44
 ```
 
-2. **Install dependencies**
+### 2. Install dependencies
+
 ```bash
 npm install
 ```
 
-3. **Set up environment variables**
+### 3. Set up environment variables
+
+Copy `.env.example` to `.env` and configure:
+
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your database credentials and NextAuth configuration:
+Update the following variables in `.env`:
+
 ```env
-DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
+# Database
+DATABASE_URL="postgresql://user:password@localhost:5432/base44"
+
+# NextAuth
 NEXTAUTH_URL="http://localhost:3000"
-NEXTAUTH_SECRET="generate-with-openssl-rand-base64-32"
+NEXTAUTH_SECRET="your-32-character-secret-key"
+
+# Pusher (get from pusher.com)
+PUSHER_APP_ID="your-pusher-app-id"
+NEXT_PUBLIC_PUSHER_KEY="your-pusher-key"
+PUSHER_SECRET="your-pusher-secret"
+NEXT_PUBLIC_PUSHER_CLUSTER="eu"
 ```
 
-4. **Set up the database**
+### 4. Set up the database
+
 ```bash
+# Generate Prisma Client
 npx prisma generate
-npx prisma db push
-npx prisma db seed
+
+# Run migrations
+npx prisma migrate dev
+
+# Seed the database with demo data
+npm run prisma:seed
 ```
 
-5. **Run the development server**
+### 5. Start the development server
+
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Visit `http://localhost:3000` to see the application.
 
-## 🔐 Test Accounts
+## 🔑 Default Credentials
 
-After seeding the database, you can log in with:
+After seeding, use these credentials to log in:
 
-**Admin:**
-- Email: `admin@base44.com`
-- Password: `admin123`
+```
+Admin:
+Email: admin@base44.com
+Password: Admin123!
 
-**Pentester:**
-- Email: `pentester@base44.com`
-- Password: `pentester123`
+Auditor:
+Email: auditor@base44.com
+Password: Admin123!
 
-**Client:**
-- Email: `client@base44.com`
-- Password: `client123`
+Client:
+Email: client@base44.com
+Password: Admin123!
+```
 
-## 📝 Available Scripts
+## 🚢 Deployment to Railway
 
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm run start` - Start production server
-- `npm run lint` - Run ESLint
-- `npm run type-check` - Run TypeScript type checking
-- `npm run prisma:generate` - Generate Prisma client
-- `npm run prisma:push` - Push schema to database
-- `npm run prisma:seed` - Seed database with initial data
-- `npm run prisma:studio` - Open Prisma Studio
+### 1. Prerequisites
+- Railway account
+- GitHub repository with your code
 
-## 🚀 Deployment
+### 2. Deploy to Railway
 
-### Vercel
+1. Click "New Project" in Railway
+2. Select "Deploy from GitHub repo"
+3. Choose your repository
+4. Railway will auto-detect Next.js
 
-1. Push to GitHub
-2. Import project in Vercel
-3. Add environment variables
-4. Deploy
+### 3. Configure Environment Variables
 
-### Database (Supabase)
+Add these in Railway dashboard:
 
-1. Create a project on [supabase.com](https://supabase.com)
-2. Get the connection string (Transaction mode)
-3. Add to `DATABASE_URL` in environment variables
-4. Run migrations and seed
+```env
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+NEXTAUTH_URL=${{RAILWAY_PUBLIC_DOMAIN}}
+NEXTAUTH_SECRET=your-32-character-secret
+PUSHER_APP_ID=your-pusher-app-id
+NEXT_PUBLIC_PUSHER_KEY=your-pusher-key
+PUSHER_SECRET=your-pusher-secret
+NEXT_PUBLIC_PUSHER_CLUSTER=eu
+NODE_ENV=production
+```
+
+### 4. Add PostgreSQL Database
+
+1. In your Railway project, click "+ New"
+2. Select "Database" → "PostgreSQL"
+3. Railway automatically links it to your app
+
+### 5. Deploy
+
+```bash
+git push origin main
+```
+
+Railway will automatically build and deploy your application.
 
 ## 📁 Project Structure
 
 ```
 base44/
-├── app/                  # Next.js app directory
-│   ├── (auth)/          # Authentication pages
-│   ├── api/             # API routes
-│   └── dashboard/       # Dashboard pages
-├── components/          # React components
-│   ├── ui/             # UI components
-│   ├── layout/         # Layout components
-│   └── charts/         # Chart components
-├── lib/                 # Utility functions
-├── prisma/             # Database schema and seeds
-├── types/              # TypeScript types
-└── contexts/           # React contexts
+├── app/                      # Next.js app directory
+│   ├── (auth)/              # Auth pages (login, register)
+│   ├── (dashboard)/         # Protected dashboard pages
+│   ├── api/                 # API routes
+│   ├── globals.css          # Global styles
+│   ├── layout.tsx           # Root layout
+│   └── page.tsx             # Home page
+├── components/              # React components
+│   ├── ui/                  # Reusable UI components
+│   ├── dashboard/           # Dashboard components
+│   ├── targets/             # Target management
+│   ├── pentests/            # Pentest management
+│   ├── findings/            # Finding management
+│   └── providers/           # Context providers
+├── lib/                     # Utility functions
+│   ├── prisma.ts           # Prisma client
+│   ├── auth.ts             # Auth configuration
+│   └── utils.ts            # Helper functions
+├── hooks/                   # Custom React hooks
+├── types/                   # TypeScript types
+├── prisma/                  # Database schema
+│   ├── schema.prisma       # Prisma schema
+│   ├── seed.ts             # Seed data
+│   └── migrations/         # Database migrations
+├── public/                  # Static assets
+├── middleware.ts            # Route protection
+├── next.config.js          # Next.js config
+├── tailwind.config.js      # Tailwind config
+├── tsconfig.json           # TypeScript config
+└── package.json            # Dependencies
 ```
+
+## 🧪 Development
+
+### Running Prisma Studio
+
+View and edit your database:
+
+```bash
+npm run prisma:studio
+```
+
+### Creating a new migration
+
+```bash
+npx prisma migrate dev --name description-of-changes
+```
+
+### Resetting the database
+
+```bash
+npx prisma migrate reset
+```
+
+This will:
+1. Drop the database
+2. Recreate it
+3. Run all migrations
+4. Run the seed file
+
+## 📊 Database Schema
+
+The application uses the following main entities:
+
+- **User** - Application users with roles
+- **Company** - Multi-tenant organizations
+- **Target** - Security assessment targets
+- **Pentest** - Penetration test projects
+- **Finding** - Security vulnerabilities
+- **FindingTemplate** - Reusable finding templates
+- **Comment** - Collaboration comments
+- **Report** - Generated security reports
+- **Notification** - User notifications
+- **ActivityLog** - Audit trail
+- **ApiKey** - API access keys
 
 ## 🔒 Security Features
 
-- Password hashing with bcrypt
-- JWT-based authentication
-- Protected API routes
-- RBAC with three roles
+- JWT-based authentication with NextAuth.js
+- Password hashing with bcryptjs
+- Role-based access control (RBAC)
+- Route protection middleware
 - Input validation with Zod
-- SQL injection prevention with Prisma
+- SQL injection prevention via Prisma
+- XSS protection
+- CSRF tokens
+- Rate limiting on APIs
+- Secure headers (CSP, HSTS)
+- Session timeout
 
-## 📊 API Endpoints
+## 🎨 UI/UX Features
 
-The application provides 47 API endpoints covering:
-- Authentication (4)
-- Companies (4)
-- Pentests (5)
-- Targets (5)
-- Findings (5)
-- Comments (5)
-- Reports (5)
-- Templates (5)
-- Notifications (6)
-- Dashboard (1)
-- Upload (2)
+- Dark mode by default (light mode available)
+- Responsive design (mobile, tablet, desktop)
+- Loading states with skeletons
+- Empty states with helpful messages
+- Error boundaries
+- Toast notifications
+- Modal dialogs
+- Collapsible sidebar
+- Breadcrumb navigation
+- Global search (Cmd+K)
+
+## 📈 Performance
+
+- Code splitting and lazy loading
+- Image optimization with Next.js Image
+- Database query optimization
+- Optimistic UI updates
+- Background job processing
+- CDN for static assets
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
 
-## 📄 License
+## 📝 License
 
 This project is licensed under the MIT License.
 
 ## 🆘 Support
 
-For support, email support@base44.com or open an issue on GitHub.
+For issues and questions:
+- Open an issue on GitHub
+- Check the documentation
+- Contact support@base44.com
+
+## 🚀 Roadmap
+
+- [ ] Two-factor authentication
+- [ ] Jira integration
+- [ ] Slack notifications
+- [ ] Advanced report templates
+- [ ] Bulk import/export
+- [ ] Mobile app
+- [ ] AI-powered vulnerability detection
 
 ---
 
-Built with ❤️ by Base44 Team
+Built with ❤️ by the BASE44 team

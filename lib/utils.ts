@@ -1,347 +1,188 @@
-import { type ClassValue, clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-import { format, formatDistance, formatRelative, isValid, parseISO } from 'date-fns';
+import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
 
-// Tailwind CSS class merger
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Format date functions
-export function formatDate(date: string | Date | null | undefined): string {
+export function formatDate(date: Date | string | null | undefined): string {
   if (!date) return 'N/A';
   
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  const d = typeof date === 'string' ? new Date(date) : date;
   
-  if (!isValid(dateObj)) return 'Invalid date';
-  
-  return format(dateObj, 'PPP');
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(d);
 }
 
-export function formatDateTime(date: string | Date | null | undefined): string {
+export function formatDateTime(date: Date | string | null | undefined): string {
   if (!date) return 'N/A';
   
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  const d = typeof date === 'string' ? new Date(date) : date;
   
-  if (!isValid(dateObj)) return 'Invalid date';
-  
-  return format(dateObj, 'PPP p');
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(d);
 }
 
-export function formatRelativeTime(date: string | Date | null | undefined): string {
-  if (!date) return 'N/A';
+export function formatRelativeTime(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  const now = new Date();
+  const diffInSeconds = Math.floor((now.getTime() - d.getTime()) / 1000);
+
+  if (diffInSeconds < 60) return 'just now';
+  if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
+  if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+  if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)} days ago`;
   
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
-  
-  if (!isValid(dateObj)) return 'Invalid date';
-  
-  return formatDistance(dateObj, new Date(), { addSuffix: true });
+  return formatDate(d);
 }
 
-export function formatShortDate(date: string | Date | null | undefined): string {
-  if (!date) return 'N/A';
-  
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
-  
-  if (!isValid(dateObj)) return 'Invalid date';
-  
-  return format(dateObj, 'MMM d, yyyy');
-}
-
-// Severity color mapping
 export function getSeverityColor(severity: string): string {
-  const colors = {
-    CRITICAL: 'text-red-700 bg-red-50 border-red-200',
-    HIGH: 'text-orange-700 bg-orange-50 border-orange-200',
-    MEDIUM: 'text-yellow-700 bg-yellow-50 border-yellow-200',
-    LOW: 'text-blue-700 bg-blue-50 border-blue-200',
-    INFO: 'text-gray-700 bg-gray-50 border-gray-300',
+  const colors: Record<string, string> = {
+    CRITICAL: 'bg-critical text-critical-foreground',
+    HIGH: 'bg-danger text-danger-foreground',
+    MEDIUM: 'bg-warning text-warning-foreground',
+    LOW: 'bg-info text-info-foreground',
+    INFORMATIONAL: 'bg-muted text-muted-foreground',
   };
   
-  return colors[severity as keyof typeof colors] || colors.INFO;
+  return colors[severity] || colors.INFORMATIONAL;
 }
 
-export function getSeverityBgColor(severity: string): string {
-  const colors = {
-    CRITICAL: 'bg-red-500',
-    HIGH: 'bg-orange-500',
-    MEDIUM: 'bg-yellow-500',
-    LOW: 'bg-blue-500',
-    INFO: 'bg-gray-500',
-  };
-  
-  return colors[severity as keyof typeof colors] || colors.INFO;
-}
-
-export function getSeverityTextColor(severity: string): string {
-  const colors = {
-    CRITICAL: 'text-red-600',
-    HIGH: 'text-orange-600',
-    MEDIUM: 'text-yellow-600',
-    LOW: 'text-blue-600',
-    INFO: 'text-gray-600',
-  };
-  
-  return colors[severity as keyof typeof colors] || colors.INFO;
-}
-
-// Status color mapping
 export function getStatusColor(status: string): string {
-  const colors = {
-    // Pentest status
-    SCHEDULED: 'text-blue-700 bg-blue-50 border-blue-200',
-    IN_PROGRESS: 'text-yellow-700 bg-yellow-50 border-yellow-200',
-    REPORTED: 'text-purple-700 bg-purple-50 border-purple-200',
-    RESCAN: 'text-orange-700 bg-orange-50 border-orange-200',
-    COMPLETED: 'text-green-700 bg-green-50 border-green-200',
-    CANCELLED: 'text-gray-700 bg-gray-50 border-gray-300',
-    
-    // Finding status
-    OPEN: 'text-red-700 bg-red-50 border-red-200',
-    RESOLVED: 'text-green-700 bg-green-50 border-green-200',
-    CLOSED: 'text-gray-700 bg-gray-50 border-gray-300',
-    
-    // Target status
-    ACTIVE: 'text-green-700 bg-green-50 border-green-200',
-    INACTIVE: 'text-yellow-700 bg-yellow-50 border-yellow-200',
-    ARCHIVED: 'text-gray-700 bg-gray-50 border-gray-300',
-    
-    // Report status
-    DRAFT: 'text-yellow-700 bg-yellow-50 border-yellow-200',
-    FINAL: 'text-blue-700 bg-blue-50 border-blue-200',
-    APPROVED: 'text-green-700 bg-green-50 border-green-200',
+  const colors: Record<string, string> = {
+    OPEN: 'bg-danger text-danger-foreground',
+    IN_PROGRESS: 'bg-warning text-warning-foreground',
+    RESOLVED: 'bg-success text-success-foreground',
+    ACCEPTED: 'bg-muted text-muted-foreground',
+    FALSE_POSITIVE: 'bg-muted text-muted-foreground',
+    PLANNED: 'bg-muted text-muted-foreground',
+    REVIEW: 'bg-info text-info-foreground',
+    COMPLETED: 'bg-success text-success-foreground',
+    ARCHIVED: 'bg-muted text-muted-foreground',
   };
   
-  return colors[status as keyof typeof colors] || 'text-gray-700 bg-gray-50 border-gray-300';
+  return colors[status] || colors.OPEN;
 }
 
-// Type color mapping
-export function getTypeColor(type: string): string {
-  const colors = {
-    // Target types
-    WEB_APP: 'text-blue-700 bg-blue-50 border-blue-200',
-    API: 'text-purple-700 bg-purple-50 border-purple-200',
-    MOBILE_APP: 'text-green-700 bg-green-50 border-green-200',
-    CLOUD: 'text-cyan-700 bg-cyan-50 border-cyan-200',
-    HOST: 'text-orange-700 bg-orange-50 border-orange-200',
-    NETWORK: 'text-indigo-700 bg-indigo-50 border-indigo-200',
-    
-    // Report types
-    EXECUTIVE: 'text-purple-700 bg-purple-50 border-purple-200',
-    TECHNICAL: 'text-blue-700 bg-blue-50 border-blue-200',
-    FULL: 'text-green-700 bg-green-50 border-green-200',
-    
-    // Notification types
-    INFO: 'text-blue-700 bg-blue-50 border-blue-200',
-    WARNING: 'text-yellow-700 bg-yellow-50 border-yellow-200',
-    SUCCESS: 'text-green-700 bg-green-50 border-green-200',
-    ERROR: 'text-red-700 bg-red-50 border-red-200',
+export function getCriticalityColor(level: string): string {
+  const colors: Record<string, string> = {
+    CRITICAL: 'bg-critical text-critical-foreground',
+    HIGH: 'bg-danger text-danger-foreground',
+    MEDIUM: 'bg-warning text-warning-foreground',
+    LOW: 'bg-info text-info-foreground',
   };
   
-  return colors[type as keyof typeof colors] || 'text-gray-700 bg-gray-50 border-gray-300';
+  return colors[level] || colors.MEDIUM;
 }
 
-// Role color mapping
-export function getRoleColor(role: string): string {
-  const colors = {
-    ADMIN: 'text-purple-700 bg-purple-50 border-purple-200',
-    PENTESTER: 'text-blue-700 bg-blue-50 border-blue-200',
-    CLIENT: 'text-green-700 bg-green-50 border-green-200',
-  };
-  
-  return colors[role as keyof typeof colors] || 'text-gray-700 bg-gray-50 border-gray-300';
+export function truncate(str: string, length: number): string {
+  if (str.length <= length) return str;
+  return str.slice(0, length) + '...';
 }
 
-// Generate initials from name
-export function getInitials(name: string): string {
-  if (!name) return 'UN';
-  
-  const parts = name.trim().split(' ');
-  if (parts.length === 1) {
-    return parts[0].substring(0, 2).toUpperCase();
-  }
-  
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-// Format file size
-export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 Bytes';
-  
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-// Calculate risk score color
-export function getRiskScoreColor(score: number): string {
-  if (score >= 80) return 'text-red-600 bg-red-50';
-  if (score >= 60) return 'text-orange-600 bg-orange-50';
-  if (score >= 40) return 'text-yellow-600 bg-yellow-50';
-  if (score >= 20) return 'text-blue-600 bg-blue-50';
-  return 'text-green-600 bg-green-50';
-}
-
-// Calculate progress color
-export function getProgressColor(progress: number): string {
-  if (progress === 100) return 'bg-green-500';
-  if (progress >= 75) return 'bg-blue-500';
-  if (progress >= 50) return 'bg-yellow-500';
-  if (progress >= 25) return 'bg-orange-500';
-  return 'bg-red-500';
-}
-
-// Truncate text
-export function truncate(text: string, length: number = 50): string {
-  if (!text) return '';
-  if (text.length <= length) return text;
-  return text.substring(0, length) + '...';
-}
-
-// Generate random ID
 export function generateId(): string {
-  return Math.random().toString(36).substring(2) + Date.now().toString(36);
+  return Math.random().toString(36).substring(2, 15) + 
+         Math.random().toString(36).substring(2, 15);
 }
 
-// Slugify text
-export function slugify(text: string): string {
-  return text
-    .toString()
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^\w\-]+/g, '')
-    .replace(/\-\-+/g, '-');
+export function calculateRiskScore(severity: string, likelihood: string): number {
+  const severityScores: Record<string, number> = {
+    CRITICAL: 10,
+    HIGH: 7.5,
+    MEDIUM: 5,
+    LOW: 2.5,
+    INFORMATIONAL: 1,
+  };
+
+  const likelihoodScores: Record<string, number> = {
+    HIGH: 1,
+    MEDIUM: 0.7,
+    LOW: 0.4,
+  };
+
+  const severityScore = severityScores[severity] || 5;
+  const likelihoodScore = likelihoodScores[likelihood.toUpperCase()] || 0.7;
+
+  return severityScore * likelihoodScore;
 }
 
-// Check if email is valid
-export function isValidEmail(email: string): boolean {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
+export function validateEmail(email: string): boolean {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(email);
 }
 
-// Check if URL is valid
-export function isValidUrl(url: string): boolean {
-  try {
-    new URL(url);
-    return true;
-  } catch {
-    return false;
+export function validatePassword(password: string): {
+  valid: boolean;
+  errors: string[];
+} {
+  const errors: string[] = [];
+
+  if (password.length < 8) {
+    errors.push('Password must be at least 8 characters long');
   }
-}
-
-// Parse JSON safely
-export function parseJSON<T>(json: string | null): T | null {
-  if (!json) return null;
-  
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
+  if (!/[A-Z]/.test(password)) {
+    errors.push('Password must contain at least one uppercase letter');
   }
+  if (!/[a-z]/.test(password)) {
+    errors.push('Password must contain at least one lowercase letter');
+  }
+  if (!/[0-9]/.test(password)) {
+    errors.push('Password must contain at least one number');
+  }
+  if (!/[!@#$%^&*]/.test(password)) {
+    errors.push('Password must contain at least one special character (!@#$%^&*)');
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
 }
 
-// Deep clone object
-export function deepClone<T>(obj: T): T {
-  return JSON.parse(JSON.stringify(obj));
-}
-
-// Debounce function
 export function debounce<T extends (...args: any[]) => any>(
   func: T,
   wait: number
 ): (...args: Parameters<T>) => void {
   let timeout: NodeJS.Timeout;
-  
-  return (...args: Parameters<T>) => {
+
+  return function executedFunction(...args: Parameters<T>) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+
     clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), wait);
+    timeout = setTimeout(later, wait);
   };
 }
 
-// Calculate CVSS color
-export function getCVSSColor(score: number): string {
-  if (score >= 9.0) return 'text-red-600';
-  if (score >= 7.0) return 'text-orange-600';
-  if (score >= 4.0) return 'text-yellow-600';
-  if (score >= 0.1) return 'text-blue-600';
-  return 'text-gray-600';
-}
-
-// Format CVSS score
-export function formatCVSS(score: number): string {
-  return score.toFixed(1);
-}
-
-// Calculate severity from CVSS
-export function getSeverityFromCVSS(score: number): string {
-  if (score >= 9.0) return 'CRITICAL';
-  if (score >= 7.0) return 'HIGH';
-  if (score >= 4.0) return 'MEDIUM';
-  if (score >= 0.1) return 'LOW';
-  return 'INFO';
-}
-
-// Group array by key
-export function groupBy<T>(array: T[], key: keyof T): Record<string, T[]> {
-  return array.reduce((result, item) => {
-    const group = String(item[key]);
-    if (!result[group]) result[group] = [];
-    result[group].push(item);
-    return result;
-  }, {} as Record<string, T[]>);
-}
-
-// Sort array by key
-export function sortBy<T>(array: T[], key: keyof T, order: 'asc' | 'desc' = 'asc'): T[] {
-  return [...array].sort((a, b) => {
-    const aVal = a[key];
-    const bVal = b[key];
-    
-    if (aVal < bVal) return order === 'asc' ? -1 : 1;
-    if (aVal > bVal) return order === 'asc' ? 1 : -1;
-    return 0;
+export function parseQueryParams(searchParams: URLSearchParams) {
+  const params: Record<string, any> = {};
+  
+  searchParams.forEach((value, key) => {
+    params[key] = value;
   });
+  
+  return params;
 }
 
-// Calculate percentage
-export function calculatePercentage(value: number, total: number): number {
-  if (total === 0) return 0;
-  return Math.round((value / total) * 100);
-}
-
-// Format percentage
-export function formatPercentage(value: number): string {
-  return `${value}%`;
-}
-
-// Check if dark mode
-export function isDarkMode(): boolean {
-  if (typeof window === 'undefined') return false;
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
-}
-
-// Copy to clipboard
-export async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// Download file
-export function downloadFile(content: string, filename: string, type: string = 'text/plain') {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+export function buildQueryString(params: Record<string, any>): string {
+  const queryParams = new URLSearchParams();
+  
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      queryParams.append(key, String(value));
+    }
+  });
+  
+  const queryString = queryParams.toString();
+  return queryString ? `?${queryString}` : '';
 }

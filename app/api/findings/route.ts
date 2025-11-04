@@ -1,83 +1,83 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { requireAuth, requirePentester } from '@/lib/auth-helpers';
-import { 
-  successResponse, 
-  errorResponse, 
-  unauthorizedResponse,
-  forbiddenResponse,
-  createdResponse,
-  getPaginationParams,
-  getQueryParams,
-  getSortParams,
-  paginatedResponse
-} from '@/lib/api-response';
-import { createFindingSchema, filterFindingsSchema } from '@/lib/validations';
-import { notificationTemplates, notifyPentestTeam, createNotification } from '@/lib/notifications';
+import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import prisma from '@/lib/prisma';
+import { z } from 'zod';
 
-// GET /api/findings - List findings with filters
-export async function GET(request: NextRequest) {
+const findingSchema = z.object({
+  title: z.string().min(1, 'Title is required'),
+  description: z.string().min(1, 'Description is required'),
+  severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFORMATIONAL']),
+  status: z.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'ACCEPTED', 'FALSE_POSITIVE']).default('OPEN'),
+  cvssScore: z.number().min(0).max(10).optional(),
+  cvssVector: z.string().optional(),
+  reproductionSteps: z.string().optional(),
+  proofOfConcept: z.string().optional(),
+  businessImpact: z.string().optional(),
+  technicalImpact: z.string().optional(),
+  likelihood: z.string().optional(),
+  riskScore: z.number().optional(),
+  affectedAssets: z.array(z.string()).default([]),
+  screenshots: z.array(z.string()).default([]),
+  recommendedFix: z.string().optional(),
+  remediationPriority: z.string().optional(),
+  fixDeadline: z.string().optional(),
+  verificationStatus: z.string().optional(),
+  retestNotes: z.string().optional(),
+  owaspCategory: z.string().optional(),
+  pentestId: z.string(),
+  targetId: z.string(),
+  assigneeId: z.string().optional(),
+});
+
+// GET - List all findings
+export async function GET(request: Request) {
   try {
-    const user = await requireAuth();
-    const params = getQueryParams(request);
-    const { page, limit, skip } = getPaginationParams(params);
-    const { sortBy, sortOrder } = getSortParams(params);
-    
-    // Parse filters
-    const filters = {
-      severity: params.get('severity'),
-      status: params.get('status'),
-      pentestId: params.get('pentestId'),
-      targetId: params.get('targetId'),
-      assignedToId: params.get('assignedToId'),
-      category: params.get('category'),
-      query: params.get('query'),
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get('search') || '';
+    const severity = searchParams.get('severity');
+    const status = searchParams.get('status');
+    const pentestId = searchParams.get('pentestId');
+    const targetId = searchParams.get('targetId');
+    const page = parseInt(searchParams.get('page') || '1');
+    const pageSize = parseInt(searchParams.get('pageSize') || '10');
+
+    const where: any = {
+      companyId: session.user.companyId,
     };
 
-    // Build where clause
-    const where: any = { companyId: user.companyId };
-
-    if (filters.severity) {
-      where.severity = filters.severity;
-    }
-
-    if (filters.status) {
-      where.status = filters.status;
-    }
-
-    if (filters.pentestId) {
-      where.pentestId = filters.pentestId;
-    }
-
-    if (filters.targetId) {
-      where.targetId = filters.targetId;
-    }
-
-    if (filters.assignedToId) {
-      where.assignedToId = filters.assignedToId;
-    }
-
-    if (filters.category) {
-      where.category = filters.category;
-    }
-
-    if (filters.query) {
+    if (search) {
       where.OR = [
-        { title: { contains: filters.query, mode: 'insensitive' } },
-        { description: { contains: filters.query, mode: 'insensitive' } },
-        { category: { contains: filters.query, mode: 'insensitive' } },
+        { title: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
       ];
     }
 
-    // Get findings with related data
+    if (severity && severity !== 'ALL') {
+      where.severity = severity;
+    }
+
+    if (status && status !== 'ALL') {
+      where.status = status;
+    }
+
+    if (pentestId) {
+      where.pentestId = pentestId;
+    }
+
+    if (targetId) {
+      where.targetId = targetId;
+    }
+
     const [findings, total] = await Promise.all([
       prisma.finding.findMany({
         where,
-        skip,
-        take: limit,
-        orderBy: sortBy === 'severity' 
-          ? [{ severity: 'asc' }, { createdAt: sortOrder }]
-          : { [sortBy]: sortOrder },
         include: {
           pentest: {
             select: {
@@ -90,23 +90,21 @@ export async function GET(request: NextRequest) {
             select: {
               id: true,
               name: true,
-              type: true,
-              url: true,
+              targetType: true,
+              criticalityLevel: true,
             },
           },
-          reporter: {
+          createdBy: {
             select: {
               id: true,
-              fullName: true,
-              email: true,
+              name: true,
               avatar: true,
             },
           },
-          assignedTo: {
+          assignee: {
             select: {
               id: true,
-              fullName: true,
-              email: true,
+              name: true,
               avatar: true,
             },
           },
@@ -116,260 +114,174 @@ export async function GET(request: NextRequest) {
             },
           },
         },
+        orderBy: [
+          { severity: 'asc' }, // CRITICAL first
+          { createdAt: 'desc' },
+        ],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
       }),
       prisma.finding.count({ where }),
     ]);
 
-    // Format response with additional metadata
-    const formattedFindings = findings.map(finding => ({
-      id: finding.id,
-      title: finding.title,
-      description: finding.description,
-      severity: finding.severity,
-      cvssScore: finding.cvssScore,
-      status: finding.status,
-      category: finding.category,
-      pentest: finding.pentest,
-      target: finding.target,
-      reporter: finding.reporter,
-      assignedTo: finding.assignedTo,
-      evidence: {
-        hasProofOfConcept: !!finding.proofOfConcept,
-        hasReproductionSteps: !!finding.reproductionSteps,
-        hasRequestExample: !!finding.requestExample,
-        hasResponseExample: !!finding.responseExample,
-        evidenceImagesCount: finding.evidenceImages.length,
-      },
-      remediation: {
-        hasRemediation: !!finding.remediation,
-        hasRemediationCode: !!finding.remediationCode,
-        referencesCount: finding.references.length,
-      },
-      stats: {
-        comments: finding._count.comments,
-      },
-      createdAt: finding.createdAt,
-      updatedAt: finding.updatedAt,
-    }));
-
-    return paginatedResponse(formattedFindings, page, limit, total);
+    return NextResponse.json({
+      data: findings,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    });
   } catch (error) {
-    console.error('Error fetching findings:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-    }
-    
-    return errorResponse('Failed to fetch findings', 500);
+    console.error('Get findings error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch findings' },
+      { status: 500 }
+    );
   }
 }
 
-// POST /api/findings - Create new finding
-export async function POST(request: NextRequest) {
+// POST - Create new finding
+export async function POST(request: Request) {
   try {
-    const user = await requirePentester();
-    const body = await request.json();
-    
-    // Validate input
-    const validationResult = createFindingSchema.safeParse(body);
-    
-    if (!validationResult.success) {
-      return errorResponse(validationResult.error, 400);
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const data = validationResult.data;
+    // Check permissions
+    if (!['ADMIN', 'AUDITOR'].includes(session.user.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
-    // Verify pentest exists and user has access
-    const pentest = await prisma.pentest.findFirst({
+    const body = await request.json();
+    const validatedData = findingSchema.parse(body);
+
+    // Verify pentest belongs to company
+    const pentest = await prisma.pentest.findUnique({
       where: {
-        id: data.pentestId,
-        companyId: user.companyId,
-        status: { in: ['IN_PROGRESS', 'REPORTED'] },
+        id: validatedData.pentestId,
+        companyId: session.user.companyId,
       },
     });
 
     if (!pentest) {
-      return errorResponse('Pentest not found or not in progress', 404);
+      return NextResponse.json(
+        { error: 'Pentest not found' },
+        { status: 404 }
+      );
     }
 
-    // Verify target exists and matches pentest
-    const target = await prisma.target.findFirst({
+    // Verify target belongs to company
+    const target = await prisma.target.findUnique({
       where: {
-        id: data.targetId,
-        companyId: user.companyId,
+        id: validatedData.targetId,
+        companyId: session.user.companyId,
       },
     });
 
     if (!target) {
-      return errorResponse('Target not found', 404);
+      return NextResponse.json(
+        { error: 'Target not found' },
+        { status: 404 }
+      );
     }
 
-    if (pentest.targetId !== data.targetId) {
-      return errorResponse('Target does not match pentest', 400);
-    }
-
-    // Verify assignee if provided
-    if (data.assignedToId) {
-      const assignee = await prisma.user.findFirst({
-        where: {
-          id: data.assignedToId,
-          companyId: user.companyId,
-          role: { in: ['ADMIN', 'PENTESTER'] },
-        },
-      });
-
-      if (!assignee) {
-        return errorResponse('Invalid assignee', 400);
-      }
-    }
-
-    // Create finding
     const finding = await prisma.finding.create({
       data: {
-        title: data.title,
-        description: data.description,
-        severity: data.severity,
-        cvssScore: data.cvssScore,
-        status: data.status || 'OPEN',
-        category: data.category,
-        proofOfConcept: data.proofOfConcept,
-        reproductionSteps: data.reproductionSteps,
-        requestExample: data.requestExample,
-        responseExample: data.responseExample,
-        evidenceImages: data.evidenceImages || [],
-        remediation: data.remediation,
-        remediationCode: data.remediationCode,
-        references: data.references || [],
-        pentestId: data.pentestId,
-        targetId: data.targetId,
-        companyId: user.companyId,
-        reporterId: user.id,
-        assignedToId: data.assignedToId,
+        ...validatedData,
+        fixDeadline: validatedData.fixDeadline
+          ? new Date(validatedData.fixDeadline)
+          : undefined,
+        companyId: session.user.companyId,
+        createdById: session.user.id,
       },
       include: {
         pentest: {
           select: {
             id: true,
             title: true,
+            status: true,
           },
         },
         target: {
           select: {
             id: true,
             name: true,
+            targetType: true,
+            criticalityLevel: true,
           },
         },
-        reporter: {
+        createdBy: {
           select: {
             id: true,
-            fullName: true,
-            email: true,
+            name: true,
+            avatar: true,
           },
         },
-        assignedTo: {
+        assignee: {
           select: {
             id: true,
-            fullName: true,
-            email: true,
+            name: true,
+            avatar: true,
           },
         },
       },
     });
 
-    // Update target risk score based on new finding
-    await updateTargetRiskScore(data.targetId);
+    // Log activity
+    await prisma.activityLog.create({
+      data: {
+        type: 'CREATE',
+        entity: 'FINDING',
+        entityId: finding.id,
+        action: `Created ${finding.severity} finding: ${finding.title}`,
+        userId: session.user.id,
+        pentestId: finding.pentestId,
+        findingId: finding.id,
+      },
+    });
 
-    // Send notifications
-    const notification = notificationTemplates.findingCreated(
-      finding.severity,
-      finding.title,
-      finding.id
-    );
-    
-    // Notify pentest team
-    await notifyPentestTeam(pentest.id, notification, user.id);
-    
-    // If assigned, notify assignee
-    if (finding.assignedToId && finding.assignedToId !== user.id) {
-      const assignNotification = notificationTemplates.findingAssigned(
-        finding.title,
-        finding.id
-      );
-      await createNotification({
-        userId: finding.assignedToId,
-        ...assignNotification,
+    // Create notification for critical findings
+    if (finding.severity === 'CRITICAL') {
+      // Get all admins and auditors
+      const users = await prisma.user.findMany({
+        where: {
+          companyId: session.user.companyId,
+          role: {
+            in: ['ADMIN', 'AUDITOR'],
+          },
+          id: {
+            not: session.user.id, // Don't notify creator
+          },
+        },
+      });
+
+      // Create notifications
+      await prisma.notification.createMany({
+        data: users.map((user) => ({
+          type: 'CRITICAL_FINDING',
+          title: 'Critical Finding Detected',
+          message: `New critical vulnerability: ${finding.title}`,
+          link: `/findings/${finding.id}`,
+          userId: user.id,
+        })),
       });
     }
 
-    const responseData = {
-      id: finding.id,
-      title: finding.title,
-      description: finding.description,
-      severity: finding.severity,
-      cvssScore: finding.cvssScore,
-      status: finding.status,
-      category: finding.category,
-      pentest: finding.pentest,
-      target: finding.target,
-      reporter: finding.reporter,
-      assignedTo: finding.assignedTo,
-      createdAt: finding.createdAt,
-    };
-
-    return createdResponse(responseData, 'Finding created successfully');
+    return NextResponse.json(finding, { status: 201 });
   } catch (error) {
-    console.error('Error creating finding:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-      if (error.message === 'Forbidden') {
-        return forbiddenResponse();
-      }
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: error.errors },
+        { status: 400 }
+      );
     }
-    
-    return errorResponse('Failed to create finding', 500);
+
+    console.error('Create finding error:', error);
+    return NextResponse.json(
+      { error: 'Failed to create finding' },
+      { status: 500 }
+    );
   }
-}
-
-// Helper function to update target risk score
-async function updateTargetRiskScore(targetId: string) {
-  // Calculate risk score based on findings
-  const findings = await prisma.finding.findMany({
-    where: {
-      targetId,
-      status: { in: ['OPEN', 'IN_PROGRESS'] },
-    },
-    select: {
-      severity: true,
-      cvssScore: true,
-    },
-  });
-
-  let riskScore = 0;
-  const severityWeights = {
-    CRITICAL: 20,
-    HIGH: 15,
-    MEDIUM: 10,
-    LOW: 5,
-    INFO: 2,
-  };
-
-  findings.forEach(finding => {
-    const severityWeight = severityWeights[finding.severity as keyof typeof severityWeights] || 0;
-    const cvssMultiplier = finding.cvssScore / 10;
-    riskScore += severityWeight * cvssMultiplier;
-  });
-
-  // Normalize to 0-100
-  riskScore = Math.min(100, Math.round(riskScore));
-
-  // Update target
-  await prisma.target.update({
-    where: { id: targetId },
-    data: { riskScore },
-  });
 }

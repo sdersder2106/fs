@@ -1,402 +1,336 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { requireAuth, requirePentester } from '@/lib/auth-helpers';
-import { 
-  successResponse, 
-  errorResponse, 
-  unauthorizedResponse,
-  forbiddenResponse,
-  notFoundResponse,
-  updatedResponse,
-  deletedResponse
-} from '@/lib/api-response';
-import { updateFindingSchema } from '@/lib/validations';
-import { notificationTemplates, createNotification, notifyPentestTeam } from '@/lib/notifications';
+import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import prisma from '@/lib/prisma';
+import { z } from 'zod';
 
-interface RouteParams {
-  params: { id: string };
-}
+const findingSchema = z.object({
+  title: z.string().min(1, 'Title is required'),
+  description: z.string().min(1, 'Description is required'),
+  severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFORMATIONAL']),
+  status: z.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'ACCEPTED', 'FALSE_POSITIVE']),
+  cvssScore: z.number().min(0).max(10).optional(),
+  cvssVector: z.string().optional(),
+  reproductionSteps: z.string().optional(),
+  proofOfConcept: z.string().optional(),
+  businessImpact: z.string().optional(),
+  technicalImpact: z.string().optional(),
+  likelihood: z.string().optional(),
+  riskScore: z.number().optional(),
+  affectedAssets: z.array(z.string()).default([]),
+  screenshots: z.array(z.string()).default([]),
+  recommendedFix: z.string().optional(),
+  remediationPriority: z.string().optional(),
+  fixDeadline: z.string().optional(),
+  verificationStatus: z.string().optional(),
+  retestNotes: z.string().optional(),
+  owaspCategory: z.string().optional(),
+  targetId: z.string(),
+  assigneeId: z.string().optional(),
+});
 
-// GET /api/findings/[id] - Get single finding with full details
-export async function GET(request: NextRequest, { params }: RouteParams) {
+// GET - Get single finding
+export async function GET(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
   try {
-    const user = await requireAuth();
-    const { id } = params;
+    const session = await getServerSession(authOptions);
 
-    const finding = await prisma.finding.findFirst({
-      where: { 
-        id,
-        companyId: user.companyId,
-      },
-      include: {
-        pentest: {
-          include: {
-            target: true,
-            createdBy: {
-              select: {
-                id: true,
-                fullName: true,
-                email: true,
-              },
-            },
-          },
-        },
-        target: true,
-        reporter: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            avatar: true,
-            role: true,
-          },
-        },
-        assignedTo: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            avatar: true,
-            role: true,
-          },
-        },
-        comments: {
-          orderBy: { createdAt: 'desc' },
-          include: {
-            author: {
-              select: {
-                id: true,
-                fullName: true,
-                email: true,
-                avatar: true,
-                role: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!finding) {
-      return notFoundResponse('Finding');
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get related findings (same category or target)
-    const relatedFindings = await prisma.finding.findMany({
+    const finding = await prisma.finding.findUnique({
       where: {
-        companyId: user.companyId,
-        NOT: { id },
-        OR: [
-          { category: finding.category },
-          { targetId: finding.targetId },
-        ],
-        status: { in: ['OPEN', 'IN_PROGRESS'] },
-      },
-      take: 5,
-      orderBy: { severity: 'asc' },
-      select: {
-        id: true,
-        title: true,
-        severity: true,
-        status: true,
-        category: true,
-      },
-    });
-
-    // Format response with all details
-    const responseData = {
-      ...finding,
-      relatedFindings,
-      stats: {
-        commentsCount: finding.comments.length,
-        daysSinceCreated: Math.floor(
-          (Date.now() - finding.createdAt.getTime()) / (1000 * 60 * 60 * 24)
-        ),
-        isOverdue: finding.status === 'OPEN' && 
-          Math.floor((Date.now() - finding.createdAt.getTime()) / (1000 * 60 * 60 * 24)) > 30,
-      },
-    };
-
-    return successResponse(responseData);
-  } catch (error) {
-    console.error('Error fetching finding:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-    }
-    
-    return errorResponse('Failed to fetch finding', 500);
-  }
-}
-
-// PUT /api/findings/[id] - Update finding
-export async function PUT(request: NextRequest, { params }: RouteParams) {
-  try {
-    const user = await requirePentester();
-    const { id } = params;
-    const body = await request.json();
-    
-    // Validate input
-    const validationResult = updateFindingSchema.safeParse({ ...body, id });
-    
-    if (!validationResult.success) {
-      return errorResponse(validationResult.error, 400);
-    }
-
-    // Check if finding exists
-    const existingFinding = await prisma.finding.findFirst({
-      where: { 
-        id,
-        companyId: user.companyId,
-      },
-      include: {
-        assignedTo: true,
-      },
-    });
-
-    if (!existingFinding) {
-      return notFoundResponse('Finding');
-    }
-
-    // Only reporter, assignee, and admins can update
-    if (existingFinding.reporterId !== user.id && 
-        existingFinding.assignedToId !== user.id && 
-        user.role !== 'ADMIN') {
-      return forbiddenResponse('You do not have permission to update this finding');
-    }
-
-    const data = validationResult.data;
-
-    // Track changes for notifications
-    const statusChanged = data.status && data.status !== existingFinding.status;
-    const wasResolved = statusChanged && data.status === 'RESOLVED';
-    const wasClosed = statusChanged && data.status === 'CLOSED';
-    const assigneeChanged = data.assignedToId && data.assignedToId !== existingFinding.assignedToId;
-
-    // Verify new assignee if changed
-    if (assigneeChanged) {
-      const newAssignee = await prisma.user.findFirst({
-        where: {
-          id: data.assignedToId,
-          companyId: user.companyId,
-          role: { in: ['ADMIN', 'PENTESTER'] },
-        },
-      });
-
-      if (!newAssignee) {
-        return errorResponse('Invalid assignee', 400);
-      }
-    }
-
-    // Update finding
-    const updatedFinding = await prisma.finding.update({
-      where: { id },
-      data: {
-        ...(data.title && { title: data.title }),
-        ...(data.description && { description: data.description }),
-        ...(data.severity && { severity: data.severity }),
-        ...(data.cvssScore !== undefined && { cvssScore: data.cvssScore }),
-        ...(data.status && { status: data.status }),
-        ...(data.category !== undefined && { category: data.category }),
-        ...(data.proofOfConcept !== undefined && { proofOfConcept: data.proofOfConcept }),
-        ...(data.reproductionSteps !== undefined && { reproductionSteps: data.reproductionSteps }),
-        ...(data.requestExample !== undefined && { requestExample: data.requestExample }),
-        ...(data.responseExample !== undefined && { responseExample: data.responseExample }),
-        ...(data.evidenceImages !== undefined && { evidenceImages: data.evidenceImages }),
-        ...(data.remediation !== undefined && { remediation: data.remediation }),
-        ...(data.remediationCode !== undefined && { remediationCode: data.remediationCode }),
-        ...(data.references !== undefined && { references: data.references }),
-        ...(data.assignedToId !== undefined && { assignedToId: data.assignedToId }),
+        id: params.id,
+        companyId: session.user.companyId,
       },
       include: {
         pentest: {
           select: {
             id: true,
             title: true,
+            status: true,
+            startDate: true,
+            endDate: true,
           },
         },
         target: {
           select: {
             id: true,
             name: true,
+            description: true,
+            targetType: true,
+            criticalityLevel: true,
+            url: true,
+            ipAddress: true,
           },
         },
-        reporter: {
+        createdBy: {
           select: {
             id: true,
-            fullName: true,
+            name: true,
             email: true,
+            avatar: true,
+            role: true,
           },
         },
-        assignedTo: {
+        assignee: {
           select: {
             id: true,
-            fullName: true,
+            name: true,
             email: true,
+            avatar: true,
+            role: true,
           },
         },
-      },
-    });
-
-    // Update target risk score if severity changed
-    if (data.severity && data.severity !== existingFinding.severity) {
-      await updateTargetRiskScore(updatedFinding.targetId);
-    }
-
-    // Send notifications
-    if (wasResolved) {
-      const notification = notificationTemplates.findingResolved(
-        updatedFinding.title,
-        updatedFinding.id
-      );
-      await notifyPentestTeam(updatedFinding.pentestId, notification, user.id);
-    } else if (statusChanged) {
-      const notification = notificationTemplates.findingStatusChanged(
-        updatedFinding.title,
-        updatedFinding.status,
-        updatedFinding.id
-      );
-      await notifyPentestTeam(updatedFinding.pentestId, notification, user.id);
-    }
-
-    if (assigneeChanged && data.assignedToId) {
-      const notification = notificationTemplates.findingAssigned(
-        updatedFinding.title,
-        updatedFinding.id
-      );
-      await createNotification({
-        userId: data.assignedToId,
-        ...notification,
-      });
-    }
-
-    const responseData = {
-      id: updatedFinding.id,
-      title: updatedFinding.title,
-      description: updatedFinding.description,
-      severity: updatedFinding.severity,
-      cvssScore: updatedFinding.cvssScore,
-      status: updatedFinding.status,
-      category: updatedFinding.category,
-      pentest: updatedFinding.pentest,
-      target: updatedFinding.target,
-      reporter: updatedFinding.reporter,
-      assignedTo: updatedFinding.assignedTo,
-      updatedAt: updatedFinding.updatedAt,
-    };
-
-    return updatedResponse(responseData, 'Finding updated successfully');
-  } catch (error) {
-    console.error('Error updating finding:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-      if (error.message === 'Forbidden') {
-        return forbiddenResponse();
-      }
-    }
-    
-    return errorResponse('Failed to update finding', 500);
-  }
-}
-
-// DELETE /api/findings/[id] - Delete finding
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
-  try {
-    const user = await requirePentester();
-    const { id } = params;
-
-    // Check if finding exists
-    const finding = await prisma.finding.findFirst({
-      where: { 
-        id,
-        companyId: user.companyId,
-      },
-      include: {
-        _count: {
-          select: {
-            comments: true,
+        comments: {
+          include: {
+            author: {
+              select: {
+                id: true,
+                name: true,
+                avatar: true,
+                role: true,
+              },
+            },
           },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        },
+        activityLogs: {
+          include: {
+            user: {
+              select: {
+                name: true,
+                avatar: true,
+              },
+            },
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 20,
         },
       },
     });
 
     if (!finding) {
-      return notFoundResponse('Finding');
+      return NextResponse.json({ error: 'Finding not found' }, { status: 404 });
     }
 
-    // Only reporter and admins can delete
-    if (finding.reporterId !== user.id && user.role !== 'ADMIN') {
-      return forbiddenResponse('Only the reporter or admins can delete this finding');
-    }
-
-    // Prevent deletion if status is RESOLVED or CLOSED
-    if (finding.status === 'RESOLVED' || finding.status === 'CLOSED') {
-      return errorResponse('Cannot delete resolved or closed findings', 400);
-    }
-
-    // Delete finding (cascade will handle comments)
-    await prisma.finding.delete({
-      where: { id },
-    });
-
-    // Update target risk score
-    await updateTargetRiskScore(finding.targetId);
-
-    return deletedResponse('Finding deleted successfully');
+    return NextResponse.json(finding);
   } catch (error) {
-    console.error('Error deleting finding:', error);
-    
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return unauthorizedResponse();
-      }
-      if (error.message === 'Forbidden') {
-        return forbiddenResponse();
-      }
-    }
-    
-    return errorResponse('Failed to delete finding', 500);
+    console.error('Get finding error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch finding' },
+      { status: 500 }
+    );
   }
 }
 
-// Helper function to update target risk score
-async function updateTargetRiskScore(targetId: string) {
-  const findings = await prisma.finding.findMany({
-    where: {
-      targetId,
-      status: { in: ['OPEN', 'IN_PROGRESS'] },
-    },
-    select: {
-      severity: true,
-      cvssScore: true,
-    },
-  });
+// PUT - Update finding
+export async function PUT(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const session = await getServerSession(authOptions);
 
-  let riskScore = 0;
-  const severityWeights = {
-    CRITICAL: 20,
-    HIGH: 15,
-    MEDIUM: 10,
-    LOW: 5,
-    INFO: 2,
-  };
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-  findings.forEach(finding => {
-    const severityWeight = severityWeights[finding.severity as keyof typeof severityWeights] || 0;
-    const cvssMultiplier = finding.cvssScore / 10;
-    riskScore += severityWeight * cvssMultiplier;
-  });
+    // Check permissions
+    if (!['ADMIN', 'AUDITOR'].includes(session.user.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
-  // Normalize to 0-100
-  riskScore = Math.min(100, Math.round(riskScore));
+    // Check if finding exists and belongs to company
+    const existingFinding = await prisma.finding.findUnique({
+      where: {
+        id: params.id,
+        companyId: session.user.companyId,
+      },
+    });
 
-  await prisma.target.update({
-    where: { id: targetId },
-    data: { riskScore },
-  });
+    if (!existingFinding) {
+      return NextResponse.json({ error: 'Finding not found' }, { status: 404 });
+    }
+
+    const body = await request.json();
+    const validatedData = findingSchema.parse(body);
+
+    // Track status change for notifications
+    const statusChanged = existingFinding.status !== validatedData.status;
+    const oldStatus = existingFinding.status;
+
+    const finding = await prisma.finding.update({
+      where: {
+        id: params.id,
+      },
+      data: {
+        ...validatedData,
+        fixDeadline: validatedData.fixDeadline
+          ? new Date(validatedData.fixDeadline)
+          : null,
+      },
+      include: {
+        pentest: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+          },
+        },
+        target: {
+          select: {
+            id: true,
+            name: true,
+            targetType: true,
+            criticalityLevel: true,
+          },
+        },
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            avatar: true,
+          },
+        },
+        assignee: {
+          select: {
+            id: true,
+            name: true,
+            avatar: true,
+          },
+        },
+      },
+    });
+
+    // Log activity
+    const changes: any = {};
+    if (statusChanged) {
+      changes.status = { from: oldStatus, to: validatedData.status };
+    }
+
+    await prisma.activityLog.create({
+      data: {
+        type: 'UPDATE',
+        entity: 'FINDING',
+        entityId: finding.id,
+        action: statusChanged
+          ? `Changed status from ${oldStatus} to ${validatedData.status}: ${finding.title}`
+          : `Updated finding: ${finding.title}`,
+        changes,
+        userId: session.user.id,
+        pentestId: finding.pentestId,
+        findingId: finding.id,
+      },
+    });
+
+    // Create notification for status change
+    if (statusChanged) {
+      // Notify creator if not the updater
+      if (finding.createdById !== session.user.id) {
+        await prisma.notification.create({
+          data: {
+            type: 'STATUS_CHANGE',
+            title: 'Finding Status Changed',
+            message: `${finding.title} status changed to ${validatedData.status}`,
+            link: `/findings/${finding.id}`,
+            userId: finding.createdById,
+          },
+        });
+      }
+
+      // Notify assignee if exists and not the updater
+      if (finding.assigneeId && finding.assigneeId !== session.user.id) {
+        await prisma.notification.create({
+          data: {
+            type: 'STATUS_CHANGE',
+            title: 'Finding Status Changed',
+            message: `${finding.title} status changed to ${validatedData.status}`,
+            link: `/findings/${finding.id}`,
+            userId: finding.assigneeId,
+          },
+        });
+      }
+    }
+
+    return NextResponse.json(finding);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: error.errors },
+        { status: 400 }
+      );
+    }
+
+    console.error('Update finding error:', error);
+    return NextResponse.json(
+      { error: 'Failed to update finding' },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE - Delete finding
+export async function DELETE(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Check permissions - only admins can delete
+    if (session.user.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    // Check if finding exists and belongs to company
+    const existingFinding = await prisma.finding.findUnique({
+      where: {
+        id: params.id,
+        companyId: session.user.companyId,
+      },
+    });
+
+    if (!existingFinding) {
+      return NextResponse.json({ error: 'Finding not found' }, { status: 404 });
+    }
+
+    // Delete finding (cascade will handle comments and activity logs)
+    await prisma.finding.delete({
+      where: {
+        id: params.id,
+      },
+    });
+
+    // Log activity
+    await prisma.activityLog.create({
+      data: {
+        type: 'DELETE',
+        entity: 'FINDING',
+        entityId: params.id,
+        action: `Deleted finding: ${existingFinding.title}`,
+        userId: session.user.id,
+        pentestId: existingFinding.pentestId,
+      },
+    });
+
+    return NextResponse.json({ success: true, message: 'Finding deleted' });
+  } catch (error) {
+    console.error('Delete finding error:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete finding' },
+      { status: 500 }
+    );
+  }
 }

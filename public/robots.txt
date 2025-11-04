@@ -1,0 +1,13 @@
+# Allow all crawlers
+User-agent: *
+Allow: /
+
+# Disallow authentication pages
+User-agent: *
+Disallow: /login
+Disallow: /register
+Disallow: /forgot-password
+Disallow: /api/
+
+# Sitemap
+Sitemap: https://yourdomain.com/sitemap.xml
