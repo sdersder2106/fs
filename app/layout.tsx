@@ -1,14 +1,13 @@
-import './globals.css';
-import type { Metadata } from 'next';
+// app/layout.tsx ou app/(dashboard)/layout.tsx modifié
 import { Inter } from 'next/font/google';
-import Providers from './providers';
+import { SessionProvider } from 'next-auth/react';
+import { PusherProvider } from '@/components/providers/pusher-provider';
+// SUPPRIMÉ: import { WebSocketProvider } from '@/components/providers/websocket-provider';
+import { ThemeProvider } from '@/components/providers/theme-provider';
+import { Toaster } from '@/components/ui/toaster';
+import './globals.css';
 
 const inter = Inter({ subsets: ['latin'] });
-
-export const metadata: Metadata = {
-  title: 'Base44 Security Platform',
-  description: 'Professional Penetration Testing Management System',
-};
 
 export default function RootLayout({
   children,
@@ -16,11 +15,23 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="fr" suppressHydrationWarning>
       <body className={inter.className}>
-        <Providers>
-          {children}
-        </Providers>
+        <SessionProvider>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="dark"
+            enableSystem={false}
+            disableTransitionOnChange
+          >
+            {/* ANCIEN: <WebSocketProvider> */}
+            <PusherProvider>
+              {children}
+              <Toaster />
+            </PusherProvider>
+            {/* ANCIEN: </WebSocketProvider> */}
+          </ThemeProvider>
+        </SessionProvider>
       </body>
     </html>
   );
