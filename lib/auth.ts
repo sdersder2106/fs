@@ -85,4 +85,16 @@ export const authOptions: NextAuthOptions = {
     }
   },
   secret: process.env.NEXTAUTH_SECRET,
+  useSecureCookies: true,  // ← AJOUTEZ CECI
+  cookies: {
+    sessionToken: {
+      name: '__Secure-next-auth.session-token',  // ← IMPORTANT
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: true
+      }
+    }
+  }
 };
