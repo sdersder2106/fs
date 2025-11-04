@@ -1,7 +1,6 @@
 const { createServer } = require('http');
 const { parse } = require('url');
 const next = require('next');
-const { wsServer } = require('./lib/websocket');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
@@ -14,11 +13,7 @@ app.prepare().then(() => {
     handle(req, res, parsedUrl);
   });
 
-  // Initialize WebSocket server
-  wsServer.initialize(server);
-
   server.listen(port, () => {
     console.log(`> Ready on http://localhost:${port}`);
-    console.log('> WebSocket server initialized');
   });
 });

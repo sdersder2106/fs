@@ -1,4 +1,3 @@
-// lib/auth.ts
 import { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { PrismaAdapter } from '@next-auth/prisma-adapter';
@@ -16,16 +15,20 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
-          return null;
+          throw new Error('Invalid credentials');
         }
 
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
-          include: { company: true }
+          where: {
+            email: credentials.email
+          },
+          include: {
+            company: true
+          }
         });
 
         if (!user || !user.password) {
-          return null;
+          throw new Error('Invalid credentials');
         }
 
         const isCorrectPassword = await bcrypt.compare(
@@ -34,7 +37,7 @@ export const authOptions: NextAuthOptions = {
         );
 
         if (!isCorrectPassword) {
-          return null;
+          throw new Error('Invalid credentials');
         }
 
         return {
@@ -60,33 +63,26 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        return {
-          ...token,
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          companyId: user.companyId,
-          companyName: user.companyName
-        };
+        token.id = user.id;
+        token.email = user.email;
+        token.name = user.name;
+        token.role = user.role;
+        token.companyId = user.companyId;
+        token.companyName = user.companyName;
       }
       return token;
     },
     async session({ session, token }) {
-      return {
-        ...session,
-        user: {
-          ...session.user,
-          id: token.id as string,
-          email: token.email as string,
-          name: token.name as string,
-          role: token.role as string,
-          companyId: token.companyId as string,
-          companyName: token.companyName as string
-        }
-      };
+      if (session?.user) {
+        session.user.id = token.id as string;
+        session.user.email = token.email as string;
+        session.user.name = token.name as string;
+        session.user.role = token.role as string;
+        session.user.companyId = token.companyId as string;
+        session.user.companyName = token.companyName as string;
+      }
+      return session;
     }
   },
   secret: process.env.NEXTAUTH_SECRET,
-  debug: true, // Active le debug pour voir les erreurs
 };
